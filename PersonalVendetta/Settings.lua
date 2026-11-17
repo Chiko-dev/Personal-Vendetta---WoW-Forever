@@ -11,8 +11,8 @@
 
 local ADDON, ns = ...
 
-local WIDTH = 420
-local HEIGHT = 550
+local WIDTH = 540
+local HEIGHT = 580
 local INNER = WIDTH - 48          -- usable text width inside the border
 local LIST_ROWS = 14
 local LIST_ROW_H = 22
@@ -227,10 +227,16 @@ local function buildGeneral(page)
 	ask:ClearAllPoints()
 	ask:SetPoint("TOPLEFT", showWindow, "BOTTOMLEFT", 0, 2)
 
+	local askFight = checkbox(page, "Ask me after I survive a fight with an enemy player who came for me", ask, 0,
+		function() return ns.db.settings.promptAfterFight end,
+		function(v) ns.db.settings.promptAfterFight = v end)
+	askFight:ClearAllPoints()
+	askFight:SetPoint("TOPLEFT", ask, "BOTTOMLEFT", 0, 2)
+
 	-- Alerts -----------------------------------------------------------------
-	local hAlert = heading(page, "Alerts", ask, -14)
+	local hAlert = heading(page, "Alerts", askFight, -14)
 	hAlert:ClearAllPoints()
-	hAlert:SetPoint("TOPLEFT", ask, "BOTTOMLEFT", 2, -14)
+	hAlert:SetPoint("TOPLEFT", askFight, "BOTTOMLEFT", 2, -14)
 
 	local soundOn = checkbox(page, "Sound when someone from the list is near", hAlert, -4,
 		function() return ns.db.settings.sound.enabled end,
@@ -245,10 +251,17 @@ end
 -- ===========================================================================
 
 local listRows = {}
-local listEmpty, listFooter
+local listEmpty, listFooter, shareButton
+
+-- Column x positions inside a row:
+--   [scum] Name ......... race class ...... seen ...... They/You  [Note]
+local COL_NAME, NAME_W = 34, 150
+local DETAIL_W = 90
+local SEEN_W = 92
+local NOTE_W = 46
 
 local function renderList()
-	local entries = ns.List:Sorted()
+	local entries = ns.List:ByDateAdded()
 	local total = #entries
 	local maxOffset = math.max(0, total - LIST_ROWS)
 	if listOffset > maxOffset then listOffset = maxOffset end
@@ -259,30 +272,40 @@ local function renderList()
 		local entry = entries[listOffset + i]
 		if entry then
 			local r, g, b = ns.ClassColor(entry.class)
-			row.name:SetText(ns.LevelText(entry, ns.Radar and ns.Radar:Get(entry.key)) .. (entry.name or "?"))
+			row.name:SetText(ns.LevelText(entry, ns.Radar and ns.Radar:Get(entry.key)) .. ns.FullName(entry))
 			row.name:SetTextColor(r, g, b)
 			local bits = {}
 			if entry.race then bits[#bits + 1] = entry.race end
 			if entry.className then bits[#bits + 1] = entry.className end
 			row.detail:SetText(table.concat(bits, " "))
+
+			local near = ns.Radar and ns.Radar:Get(entry.key)
+			if near and not near.dead then
+				row.seen:SetText("|cffff4444near you now|r")
+			else
+				row.seen:SetText(entry.lastSeen and ns.Ago(entry.lastSeen) or "|cff666666never|r")
+			end
+
 			row.score:SetText(string.format("|cffff6666%d|r / |cff66ff66%d|r",
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
 			row.scum:SetChecked(entry.scum and true or false)
+			row.note:SetText(entry.note and "|cffffd100Note|r" or "|cff888888+ Note|r")
 			row.key = entry.key
+			row.entry = entry
 			row.tint:SetShown(entry.scum and true or false)
 			row:Show()
 		else
-			row.key = nil
+			row.key, row.entry = nil, nil
 			row:Hide()
 		end
 	end
 
 	listEmpty:SetShown(total == 0)
 	if total > LIST_ROWS then
-		listFooter:SetText(string.format("Showing %d-%d of %d. Scroll for more.",
+		listFooter:SetText(string.format("Newest first. Showing %d-%d of %d, scroll for more.",
 			listOffset + 1, math.min(total, listOffset + LIST_ROWS), total))
 	elseif total > 0 then
-		listFooter:SetText(total == 1 and "1 player on your list." or (total .. " players on your list."))
+		listFooter:SetText("Newest first. " .. (total == 1 and "1 player on your list." or (total .. " players on your list.")))
 	else
 		listFooter:SetText("")
 	end
@@ -290,13 +313,22 @@ local function renderList()
 	if tabs.list then
 		tabs.list:SetText(total > 0 and ("Hit list (" .. total .. ")") or "Hit list")
 	end
+	if shareButton and ns.Share then
+		local canShare, why = ns.Share:CanShare()
+		if canShare and total > 0 then
+			shareButton:Enable()
+		else
+			shareButton:Disable()
+		end
+		shareButton.why = (total == 0) and "Your list is empty." or why
+	end
 end
 
 local function buildList(page)
 	local intro = text(page, "GameFontNormalSmall",
-		"Everyone you added after they killed you, worst first. Tick " .. ns.SCUM_COLOR
-		.. "Scum|r for anyone who did it dishonourably: scum get their own horn and "
-		.. "glow red on the radar.", INNER)
+		"Everyone you added, newest first. Tick " .. ns.SCUM_COLOR .. "Scum|r for anyone who "
+		.. "killed you dishonourably. Hover a name for details; click Note to write "
+		.. "down what they did.", INNER)
 	intro:SetPoint("TOPLEFT", 0, 0)
 	intro:SetTextColor(1, 0.82, 0.3)
 
@@ -307,9 +339,13 @@ local function buildList(page)
 	local hScum = text(head, "GameFontNormalSmall", "Scum")
 	hScum:SetPoint("LEFT", 0, 0)
 	local hName = text(head, "GameFontNormalSmall", "Player")
-	hName:SetPoint("LEFT", 40, 0)
+	hName:SetPoint("LEFT", COL_NAME, 0)
+	local hNote = text(head, "GameFontNormalSmall", "Note")
+	hNote:SetPoint("RIGHT", -10, 0)
 	local hScore = text(head, "GameFontNormalSmall", "|cffff6666They|r / |cff66ff66You|r")
-	hScore:SetPoint("RIGHT", -4, 0)
+	hScore:SetPoint("RIGHT", -(NOTE_W + 8), 0)
+	local hSeen = text(head, "GameFontNormalSmall", "Last seen")
+	hSeen:SetPoint("LEFT", COL_NAME + NAME_W + 4 + DETAIL_W + 4, 0)
 
 	local holder = CreateFrame("Frame", nil, page)
 	holder:SetSize(INNER, LIST_ROWS * LIST_ROW_H)
@@ -343,20 +379,52 @@ local function buildList(page)
 		row.scum:SetScript("OnEnter", function(self) ns.ScumTooltip(self) end)
 		row.scum:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 
+		row.note = button(row, "+ Note", NOTE_W, 18)
+		row.note:SetPoint("RIGHT", -2, 0)
+		row.note:SetScript("OnClick", function()
+			if row.key and ns.Notes then ns.Notes:Open(row.key) end
+		end)
+		row.note:SetScript("OnEnter", function(self)
+			if not GameTooltip or not row.entry then return end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			if row.entry.note then
+				GameTooltip:AddLine("Note", 1, 0.82, 0.3)
+				GameTooltip:AddLine(row.entry.note, 1, 1, 1, true)
+				GameTooltip:AddLine("Click to edit.", 0.6, 0.6, 0.6)
+			else
+				GameTooltip:AddLine("Add a note: what did they do?", 1, 1, 1)
+			end
+			GameTooltip:Show()
+		end)
+		row.note:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
 		row.score = text(row, "GameFontHighlightSmall")
-		row.score:SetPoint("RIGHT", -4, 0)
+		row.score:SetPoint("RIGHT", row.note, "LEFT", -8, 0)
 
 		row.name = text(row, "GameFontNormalSmall")
-		row.name:SetPoint("LEFT", 40, 0)
-		row.name:SetWidth(150)
+		row.name:SetPoint("LEFT", COL_NAME, 0)
+		row.name:SetWidth(NAME_W)
 		row.name:SetJustifyH("LEFT")
 		row.name:SetWordWrap(false)
 
 		row.detail = text(row, "GameFontDisableSmall")
 		row.detail:SetPoint("LEFT", row.name, "RIGHT", 4, 0)
-		row.detail:SetPoint("RIGHT", row.score, "LEFT", -6, 0)
+		row.detail:SetWidth(DETAIL_W)
 		row.detail:SetJustifyH("LEFT")
 		row.detail:SetWordWrap(false)
+
+		row.seen = text(row, "GameFontDisableSmall")
+		row.seen:SetPoint("LEFT", row.detail, "RIGHT", 4, 0)
+		row.seen:SetPoint("RIGHT", row.score, "LEFT", -6, 0)
+		row.seen:SetJustifyH("LEFT")
+		row.seen:SetWordWrap(false)
+
+		-- Hover anywhere on the row for the full picture.
+		row:EnableMouse(true)
+		row:SetScript("OnEnter", function(self)
+			if self.entry then ns.EntryTooltip(self, self.entry) end
+		end)
+		row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 
 		row:EnableMouseWheel(true)
 		row:SetScript("OnMouseWheel", function(_, delta)
@@ -369,13 +437,34 @@ local function buildList(page)
 	end
 
 	listEmpty = text(page, "GameFontDisable",
-		"Nobody yet. When an enemy player kills you in the open world, you'll be "
-		.. "asked whether to add them.", INNER - 20)
+		"Nobody yet. When an enemy player kills you in the open world, or you survive "
+		.. "a fight with one, you'll be asked whether to add them.", INNER - 20)
 	listEmpty:SetPoint("TOP", holder, "TOP", 0, -40)
 	listEmpty:SetJustifyH("CENTER")
 
 	listFooter = text(page, "GameFontDisableSmall")
-	listFooter:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", 0, -6)
+	listFooter:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", 0, -8)
+
+	-- Share with the group
+	shareButton = button(page, "Share with party", 140)
+	shareButton:SetPoint("TOPRIGHT", holder, "BOTTOMRIGHT", 0, -4)
+	shareButton:SetScript("OnClick", function()
+		if ns.Share then ns.Share:Send() end
+		renderList()
+	end)
+	shareButton:SetScript("OnEnter", function(self)
+		if not GameTooltip then return end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Share your hit list")
+		GameTooltip:AddLine("Sends everyone on your list to the people in your party or raid "
+			.. "who also run Personal Vendetta. They choose whether to import, and only "
+			.. "players they don't already have are added.", 1, 1, 1, true)
+		if self.why and not self:IsEnabled() then
+			GameTooltip:AddLine(self.why, 1, 0.3, 0.3, true)
+		end
+		GameTooltip:Show()
+	end)
+	shareButton:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 end
 
 -- ===========================================================================
@@ -511,3 +600,4 @@ end
 -- the V key, or the list itself.
 ns.On("SETTINGS_CHANGED", function() Settings:Refresh() end)
 ns.On("LIST_CHANGED", function() Settings:Refresh() end)
+ns.On("GROUP_CHANGED", function() Settings:Refresh() end)

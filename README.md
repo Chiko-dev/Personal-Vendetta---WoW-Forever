@@ -9,16 +9,20 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 ## Features
 
 - **Know who killed you.** After an open-world death you get a prompt listing every enemy player who hit you, so a three-man gank offers all three. The killing blow is starred. Nothing is added without a click, so an honourable 1v1 can walk away clean.
+- **Add the ones who lost, too.** Survive a fight with an enemy player who came for you and you're offered the same prompt when combat ends. If you saw them drop, your kill is counted. Or target someone and type `/vendetta add`.
+- **Full names.** Forever characters have a first name and a surname, and the list records both, so two players called Willia never get mixed up.
+- **Notes.** Write down what someone did, or build it from one-click presets like *Ganked while leveling*, *While low HP*, *During an escort quest* or *3v1*. The note shows when you hover them and in the alert when they're near.
+- **Share with your party.** Send your list to party or raid members who also run the addon. They see how many players are new to them and import only those, with no duplicates.
 - **Mark the scum.** Tick **Scum** for anyone who killed you dishonourably. Scum get their own horn, sort to the top, and glow red in the window.
 - **A radar for your list.** A small floating window collapses to a title bar when nobody is around and expands, flashes, and sounds a horn when someone from your list comes into range. It shows their level, race, class, and the score between you.
 - **Honest levels.** White means read off them just now. Red `??` means they're 10+ levels above you. Grey `47?` is the last level the game showed.
 - **Keeps score both ways.** Their kills on you come from the death recap. Your kills on them count whenever you took part (they were your target, or they were on you or your group, or the honor system credited you), whoever landed the killing blow.
-- **Settings from the minimap skull.** Left-click opens settings, right-click shows or hides the window, drag to move it. Alert sounds (Warhorn, Boat Horn, Brass, Air Horn and more) have separate choices and volumes for normal and scum sightings.
+- **Settings from the minimap skull.** Left-click opens settings, right-click shows or hides the window, drag to move it. Alert sounds (Warhorn, Boat Horn, Brass, Air Horn and more) have separate choices and volumes for normal and scum sightings. The hit list tab shows everyone newest first, with when you last saw them.
 - **Ignores arenas and battlegrounds.** Duels never count, since a duel doesn't kill you.
 
 ## Installation
 
-1. Download `PersonalVendetta-1.0.0.zip` from the [latest release](../../releases/latest).
+1. Download the zip from the [latest release](../../releases/latest).
 2. Extract it into your AddOns folder so you end up with:
    ```
    World of Warcraft\_forever_\Interface\AddOns\PersonalVendetta\PersonalVendetta.toc
@@ -33,7 +37,10 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 | `/vendetta` | Show or hide the window |
 | `/vendetta options` | Open settings (or click the minimap skull) |
 | `/vendetta list` | Print the list in chat, marking who is near |
-| `/vendetta add <name>` / `remove <name>` | Add or take someone off by hand |
+| `/vendetta add` | Add your current target |
+| `/vendetta add <first> <surname>` / `remove <name>` | Add or take someone off by hand |
+| `/vendetta note <name>` | Write a note on someone |
+| `/vendetta share` | Share your list with your party or raid |
 | `/vendetta scum <name>` / `unscum <name>` | Mark or clear scum |
 | `/vendetta kill <name>` / `unkill <name>` | Fix your kill count by hand |
 | `/vendetta death <name>` / `undeath <name>` | Fix their kill count by hand |
@@ -58,6 +65,8 @@ Known limits:
 
 - If a pet lands the killing blow and its owner never hit you, nobody is offered, because a pet doesn't say who owns it.
 - Kill detection reads what the game shows. If one is missed or double-counted, fix it with `/vendetta kill` or `unkill`.
+- After a fight, anyone who had you targeted is offered. The game can't say who started it, so skip the ones who don't belong. Skipped players aren't offered again for 30 minutes.
+- If two people on your list share a first name, commands need the full name (`/vendetta scum Willia Saqandie`).
 
 ## Compatibility
 

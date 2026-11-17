@@ -85,13 +85,26 @@ local function extractKillers(events)
 					local dedupe = guid or ("name:" .. string.lower(name))
 					if not seen[dedupe] then
 						seen[dedupe] = true
-						killers[#killers + 1] = {
+						local first, last = ns.SplitName(name)
+						local k = {
 							guid = guid,
-							name = name,
+							name = first,
+							surname = last,
 							spell = ns.str(e.spellName),
 							killingBlow = (i == 1),
 							certain = isPlayer == true,
 						}
+						-- The killer is usually still standing over you. If we can
+						-- see them, read the surname, level, class and race now.
+						local unit = ns.Radar and ns.Radar:FindUnitByGUID(guid)
+						if unit then
+							local info = ns.Radar:ReadUnitInfo(unit)
+							k.name = info.name or k.name
+							k.surname = info.surname or k.surname
+							k.level, k.levelSkull = info.level, info.levelSkull
+							k.class, k.className, k.race = info.class, info.className, info.race
+						end
+						killers[#killers + 1] = k
 					end
 				end
 			end
@@ -110,7 +123,7 @@ local function handleKillers(killers)
 	local fresh, repeats = {}, {}
 
 	for _, k in ipairs(killers) do
-		local key, entry = ns.List:Find(k.guid, k.name)
+		local key, entry = ns.List:Find(k.guid, k.name, k.surname)
 		if entry then
 			ns.List:RecordTheirKill(k)
 			repeats[#repeats + 1] = entry
@@ -122,12 +135,12 @@ local function handleKillers(killers)
 	if #repeats > 0 and db.settings.announceRepeat then
 		for _, entry in ipairs(repeats) do
 			ns.Print(string.format("|cffff4444%s|r got you again. That is %d to %d.",
-				entry.name or "?", entry.theyKilledMe or 0, entry.iKilledThem or 0))
+				ns.FullName(entry), entry.theyKilledMe or 0, entry.iKilledThem or 0))
 		end
 	end
 
 	if #fresh > 0 and db.settings.promptOnDeath then
-		ns.Fire("OFFER_CANDIDATES", fresh)
+		ns.Fire("OFFER_CANDIDATES", fresh, "death")
 	end
 end
 
@@ -193,11 +206,11 @@ ns.Deaths = {
 		end
 		ns.Print("Last death, " .. #killers .. " player source(s):")
 		for _, k in ipairs(killers) do
-			ns.Print(string.format("  %s%s%s", k.name or "?",
+			ns.Print(string.format("  %s%s%s", ns.FullName(k.name, k.surname),
 				k.killingBlow and " |cffffd100(killing blow)|r" or "",
 				k.spell and (" -- " .. k.spell) or ""))
 		end
-		ns.Fire("OFFER_CANDIDATES", killers)
+		ns.Fire("OFFER_CANDIDATES", killers, "death")
 	end,
 	ForceProcess = function() return processRecap("manual") end,
 }

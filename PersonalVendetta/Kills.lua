@@ -71,10 +71,10 @@ function Kills:IsEngaged(key) return isEngaged(key) end
 
 local function credit(entry, how)
 	if not entry then return end
-	local _, counted = ns.List:RecordMyKill({ guid = entry.guid, name = entry.name })
+	local _, counted = ns.List:RecordMyKill({ guid = entry.guid, name = entry.name, surname = entry.surname })
 	if counted then
 		ns.Print(string.format("|cff66ff66Kill on %s counted|r (%s). Now %d to %d.",
-			entry.name or "?", how, entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			ns.FullName(entry), how, entry.theyKilledMe or 0, entry.iKilledThem or 0))
 	end
 	engaged[entry.key] = nil
 end
@@ -121,20 +121,27 @@ end)
 -- ===========================================================================
 
 -- Find which list member an honor message is about. The format varies by
--- language, so look for any known name in it and prefer the longest match
--- ("Bobby" must not be read as "Bob").
+-- language, so look for any known name in it and prefer the longest match:
+-- a full "Willia Saqandie" beats a bare "Willia", and "Bobby" must not be
+-- read as "Bob". Two different people tied for the best match is a guess,
+-- and a guess is not a kill.
 local function nameInMessage(text)
-	local best, bestLen
+	local best, bestLen, tied
 	for key, entry in pairs(ns.db.list) do
-		local n = entry.name
-		if n and #n >= 2 then
-			if string.find(text, n, 1, true) then
+		local candidates = { ns.FullName(entry) }
+		if entry.surname then candidates[2] = entry.name end
+		for _, n in ipairs(candidates) do
+			if n and #n >= 2 and string.find(text, n, 1, true) then
 				if not bestLen or #n > bestLen then
-					best, bestLen = entry, #n
+					best, bestLen, tied = entry, #n, false
+				elseif #n == bestLen and best ~= entry then
+					tied = true
 				end
+				break -- the full name was checked first; no need for the short one
 			end
 		end
 	end
+	if tied then return nil end
 	return best
 end
 

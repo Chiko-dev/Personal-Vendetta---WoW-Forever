@@ -9,7 +9,7 @@ local ADDON, ns = ...
 local MAX_ROWS = 10
 local ROW_HEIGHT = 20
 local HEADER_HEIGHT = 22
-local WIDTH = 280
+local WIDTH = 310
 
 local frame, rows
 local pendingFlash = {}
@@ -147,7 +147,7 @@ local function buildRow(index, parent, anchor)
 	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	row.name:SetPoint("LEFT", 2, 0)
 	row.name:SetJustifyH("LEFT")
-	row.name:SetWidth(136)
+	row.name:SetWidth(166)
 	row.name:SetWordWrap(false)
 
 	row.detail = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -158,6 +158,15 @@ local function buildRow(index, parent, anchor)
 	row.score = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	row.score:SetPoint("RIGHT", -2, 0)
 	row.score:SetJustifyH("RIGHT")
+
+	-- Hover for the full picture (note included). Motion only: clicks pass
+	-- through to the window, so it still drags from anywhere.
+	if row.SetMouseMotionEnabled then row:SetMouseMotionEnabled(true) end
+	if row.SetMouseClickEnabled then row:SetMouseClickEnabled(false) end
+	row:SetScript("OnEnter", function(self)
+		if self.entry and ns.EntryTooltip then ns.EntryTooltip(self, self.entry, "ANCHOR_LEFT") end
+	end)
+	row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 
 	row:Hide()
 	return row
@@ -259,20 +268,21 @@ local function refresh()
 			local entry = record.entry
 			shown = shown + 1
 			if record.dead then
-				row.name:SetText(entry.name or "?")
+				row.name:SetText(ns.FullName(entry))
 				row.name:SetTextColor(0.5, 0.5, 0.5)
 				row.detail:SetText("|cff888888dead|r")
 				setGlow(row, false)
 			else
 				local r, g, b = ns.ClassColor(entry.class)
 				local skull = entry.scum and (ns.SKULL .. " ") or ""
-				row.name:SetText(skull .. levelText(entry, record) .. (entry.name or "?"))
+				row.name:SetText(skull .. levelText(entry, record) .. ns.FullName(entry))
 				row.name:SetTextColor(r, g, b)
 				row.detail:SetText(describe(entry))
 				setGlow(row, entry.scum)
 			end
 			row.score:SetText(string.format("|cffff6666%d|r/|cff66ff66%d|r",
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			row.entry = entry
 			row:Show()
 
 			if entry.key and pendingFlash[entry.key] then
@@ -280,6 +290,7 @@ local function refresh()
 				startFlash(row)
 			end
 		else
+			row.entry = nil
 			stopEffects(row)
 			row:Hide()
 		end
@@ -295,14 +306,20 @@ local function alert(entries)
 	local anyScum = false
 	for _, entry in ipairs(entries) do
 		if entry.key then pendingFlash[entry.key] = true end
+		local noteBit = ""
+		if entry.note then
+			local n = entry.note
+			if #n > 60 then n = string.sub(n, 1, 57) .. "..." end
+			noteBit = " |cffffd100(" .. n .. ")|r"
+		end
 		if entry.scum then
 			anyScum = true
-			ns.Print(string.format("%s %sSCUM %s is near.|r Must kill. %d to %d.",
-				ns.SKULL, ns.SCUM_COLOR, entry.name or "?",
-				entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			ns.Print(string.format("%s %sSCUM %s is near.|r Must kill. %d to %d.%s",
+				ns.SKULL, ns.SCUM_COLOR, ns.FullName(entry),
+				entry.theyKilledMe or 0, entry.iKilledThem or 0, noteBit))
 		else
-			ns.Print(string.format("|cffff4444%s|r is near. %d to %d.",
-				entry.name or "?", entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			ns.Print(string.format("|cffff4444%s|r is near. %d to %d.%s",
+				ns.FullName(entry), entry.theyKilledMe or 0, entry.iKilledThem or 0, noteBit))
 		end
 	end
 
@@ -338,20 +355,32 @@ end
 -- ===========================================================================
 
 local function printList()
-	local entries = ns.List:Sorted()
+	local entries = ns.List:ByDateAdded()
 	if #entries == 0 then
 		ns.Print("The list is empty. Go get killed by someone.")
 		return
 	end
-	ns.Print("Hit list, worst first:")
+	ns.Print("Hit list, newest first:")
 	for _, e in ipairs(entries) do
 		local nearNow = ns.Radar and ns.Radar.nearby[e.key]
-		print(string.format("  |cffff6666%d|r/|cff66ff66%d|r  %s %s%s%s",
+		local name = ns.FullName(e)
+		if e.scum then name = ns.SKULL .. ns.SCUM_COLOR .. name .. "|r" end
+		print(string.format("  |cffff6666%d|r/|cff66ff66%d|r  %s %s%s  |cff888888%s|r",
 			e.theyKilledMe or 0, e.iKilledThem or 0,
-			e.scum and (ns.SKULL .. ns.SCUM_COLOR .. (e.name or "?") .. "|r") or (e.name or "?"),
+			name,
 			levelText(e, nearNow),
 			e.className and (" " .. e.className) or "",
-			nearNow and " |cffff4444<< NEAR|r" or ""))
+			nearNow and "|cffff4444<< NEAR|r" or ("seen " .. ns.Ago(e.lastSeen))))
+	end
+end
+
+-- "Not on the list", or -- when a first name fits two people -- ask for the surname.
+local function notFound(arg, count)
+	if count and count > 1 then
+		ns.Print(string.format("%d people on your list are called %s. Use the full name, e.g. "
+			.. "|cffffd100%s Surname|r.", count, arg, arg))
+	else
+		ns.Print("Not on the list: " .. arg)
 	end
 end
 
@@ -365,12 +394,29 @@ local function handleCommand(msg)
 		printList()
 	elseif cmd == "add" then
 		if arg == "" then
-			ns.Print("Usage: /vendetta add <name>")
+			-- No name: add whoever you have targeted, with everything we can read.
+			if not (ns.Radar and ns.Radar.IsEnemyPlayer("target")) then
+				ns.Print("Target an enemy player, or use |cffffd100/vendetta add <first> <surname>|r.")
+				return
+			end
+			local info = ns.Radar:ReadUnitInfo("target")
+			local _, existing = ns.List:Find(info.guid, info.name, info.surname)
+			if existing then
+				ns.Print(ns.FullName(existing) .. " is already on the list.")
+				return
+			end
+			local entry = ns.List:AddFromFight(info)
+			if entry then ns.Print("Added |cffff4444" .. ns.FullName(entry) .. "|r from your target.") end
+			return
+		end
+		local _, existing = ns.List:Find(nil, arg)
+		if existing then
+			ns.Print(ns.FullName(existing) .. " is already on the list.")
 			return
 		end
 		local _, entry = ns.List:Upsert({ name = arg })
 		if entry then
-			ns.Print("Added |cffff4444" .. (entry.name or arg) .. "|r by hand.")
+			ns.Print("Added |cffff4444" .. ns.FullName(entry) .. "|r by hand.")
 			ns.Fire("LIST_CHANGED")
 		end
 	elseif cmd == "remove" or cmd == "forgive" then
@@ -378,11 +424,16 @@ local function handleCommand(msg)
 			ns.Print("Usage: /vendetta remove <name>")
 			return
 		end
-		if ns.List:Remove(nil, arg) then
-			ns.Print("Removed " .. arg .. ". Generous of you.")
-		else
-			ns.Print("Not on the list: " .. arg)
+		local _, entry, count = ns.List:Find(nil, arg)
+		if not entry then
+			notFound(arg, count)
+			return
 		end
+		local full = ns.FullName(entry)
+		ns.List:Remove(entry.guid, full)
+		ns.Print("Removed " .. full .. ". Generous of you.")
+	elseif cmd == "share" then
+		if ns.Share then ns.Share:Send() end
 	elseif cmd == "recap" then
 		ns.Deaths.ReadNow()
 	elseif cmd == "range" then
@@ -402,7 +453,10 @@ local function handleCommand(msg)
 		print("  Deaths  " .. (ns.Deaths and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
 		print("  Prompt  " .. (ns.Prompt and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
 		print("  Radar   " .. (ns.Radar and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
-		print("  Kills   " .. (ns.Kills and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
+		print("  Kills   " .. (ns.Kills and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
+			.. "   Fights " .. (ns.Fights and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
+			.. "   Notes " .. (ns.Notes and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
+			.. "   Share " .. (ns.Share and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
 		print("  Sound   " .. (ns.Sound and ("|cff44ff44loaded|r, "
 			.. ns.Sound:Current("normal").label .. " " .. math.floor(ns.Sound:Volume("normal") * 100 + 0.5) .. "%, scum "
 			.. ns.Sound:Current("scum").label .. " " .. math.floor(ns.Sound:Volume("scum") * 100 + 0.5) .. "%")
@@ -430,13 +484,13 @@ local function handleCommand(msg)
 			ns.Print("Usage: /vendetta " .. cmd .. " <name>")
 			return
 		end
-		local key, entry = ns.List:Find(nil, arg)
+		local key, entry, count = ns.List:Find(nil, arg)
 		if not entry then
-			ns.Print("Not on the list: " .. arg)
+			notFound(arg, count)
 			return
 		end
 		ns.List:SetScum(key, cmd == "scum")
-		ns.Print(string.format("%s is %s.", entry.name or arg,
+		ns.Print(string.format("%s is %s.", ns.FullName(entry),
 			cmd == "scum" and (ns.SCUM_COLOR .. "scum|r now") or "no longer scum"))
 	elseif cmd == "kill" or cmd == "unkill" or cmd == "death" or cmd == "undeath" then
 		-- Hand corrections, for when detection misses one or double counts.
@@ -446,13 +500,20 @@ local function handleCommand(msg)
 		end
 		local field = (cmd == "kill" or cmd == "unkill") and "iKilledThem" or "theyKilledMe"
 		local delta = (cmd == "kill" or cmd == "death") and 1 or -1
-		local entry = ns.List:Adjust(arg, field, delta)
+		local entry, count = ns.List:Adjust(arg, field, delta)
 		if entry then
-			ns.Print(string.format("%s: now %d to %d.", entry.name or arg,
+			ns.Print(string.format("%s: now %d to %d.", ns.FullName(entry),
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
 		else
-			ns.Print("Not on the list: " .. arg)
+			notFound(arg, count)
 		end
+	elseif cmd == "note" then
+		local _, entry, count = ns.List:Find(nil, arg)
+		if not entry then
+			if arg == "" then ns.Print("Usage: /vendetta note <name>") else notFound(arg, count) end
+			return
+		end
+		ns.Notes:Open(entry.key)
 	elseif cmd == "wipe" then
 		if arg == "confirm" then
 			ns.List:Wipe()
@@ -464,8 +525,11 @@ local function handleCommand(msg)
 		ns.Print("Commands:")
 		print("  |cffffd100/vendetta|r  toggle the window")
 		print("  |cffffd100/vendetta list|r  print the list, marking who is near")
-		print("  |cffffd100/vendetta add <name>|r  add someone by hand")
+		print("  |cffffd100/vendetta add|r  add your current target")
+		print("  |cffffd100/vendetta add <first> <surname>|r  add someone by name")
 		print("  |cffffd100/vendetta remove <name>|r  take someone off")
+		print("  |cffffd100/vendetta note <name>|r  write a note on someone")
+		print("  |cffffd100/vendetta share|r  share your list with your party")
 		print("  |cffffd100/vendetta recap|r  re-read your last death")
 		print("  |cffffd100/vendetta options|r  open settings (or click the minimap skull)")
 		print("  |cffffd100/vendetta kill <name>|r / |cffffd100unkill|r  fix your kill count by hand")

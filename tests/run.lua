@@ -261,7 +261,7 @@ check("my kill counted", entry.iKilledThem == 1, entry.iKilledThem)
 local before = ns.List:Count()
 check("removal by name works", ns.List:Remove(nil, "Latecomer") == true)
 check("count dropped", ns.List:Count() == before - 1)
-check("name index cleaned", ns.db.nameIndex["latecomer"] == nil)
+check("removed player no longer found by name", select(2, ns.List:Find(nil, "Latecomer")) == nil)
 
 -- ---------------------------------------------------------------------------
 section("Nameplate range")
@@ -563,6 +563,12 @@ check("/vendetta options runs", (pcall(SlashCmdList.PERSONALVENDETTA, "options")
 
 -- ---------------------------------------------------------------------------
 section("Scum: ticked in the death prompt")
+-- Earlier sections leave prompts unanswered; clear them so this starts clean.
+for _ = 1, 20 do
+	if not _G.PersonalVendettaPrompt or not _G.PersonalVendettaPrompt:IsShown() then break end
+	ns.Prompt.Close()
+	H.runTimers(1)
+end
 H.now = H.now + 600
 H.recap = {
 	{ sourceName = "Gankmaster", sourceGUID = "Player-4710-000GANK1",
@@ -587,6 +593,8 @@ local _, fair = ns.List:Find(nil, "Fairfighter")
 check("ticked one added as scum", gank and gank.scum == true)
 check("unticked one added as normal", fair and not fair.scum)
 check("rows lock after Add", not prows[first].scum:IsEnabled() and not prows[first].add:IsEnabled())
+H.runTimers(1) -- every row answered: the prompt closes itself
+check("prompt closes once every row is answered", not _G.PersonalVendettaPrompt:IsShown())
 
 -- A second prompt must not inherit the old tick.
 H.now = H.now + 600
@@ -760,7 +768,7 @@ check("old sound checkbox wording gone", checkboxLabelled("Play a sound when") =
 -- ---------------------------------------------------------------------------
 section("Icon and release metadata")
 local toc = assert(io.open(ADDON_DIR .. "PersonalVendetta.toc")):read("*a")
-check("toc version 1.0", toc:find("## Version: 1.0", 1, true) ~= nil)
+check("toc version 1.1", toc:find("## Version: 1.1", 1, true) ~= nil)
 check("toc icon points at our file", toc:find("Media\\icon", 1, true) ~= nil)
 local ih = io.open(ADDON_DIR .. "Media/icon.tga", "rb")
 check("icon.tga shipped", ih ~= nil)
@@ -777,6 +785,441 @@ PersonalVendettaDB.settings.minimap.hide = true
 ns.InitDB()
 check("old minimap hide dropped", ns.db.settings.minimap.hide == nil)
 check("scum sound defaults filled in", ns.db.settings.sound.scumChoice ~= nil and ns.db.settings.sound.scumVolume ~= nil)
+
+-- ===========================================================================
+-- v1.1
+-- ===========================================================================
+
+local function clearPrompts()
+	for _ = 1, 30 do
+		if not _G.PersonalVendettaPrompt or not _G.PersonalVendettaPrompt:IsShown() then break end
+		ns.Prompt.Close()
+		H.runTimers(1)
+	end
+	local q = ns.Prompt._queue()
+	for i = #q, 1, -1 do q[i] = nil end
+end
+
+local function promptLabels()
+	local out = {}
+	for _, row in ipairs(ns.Prompt._rows() or {}) do
+		if row:IsShown() then out[#out + 1] = row.label:GetText() or "" end
+	end
+	return table.concat(out, " | ")
+end
+
+-- ---------------------------------------------------------------------------
+section("Surnames: names")
+local a, b = ns.SplitName("Willia Saqandie")
+check("joined name splits", a == "Willia" and b == "Saqandie", tostring(a) .. "/" .. tostring(b))
+a, b = ns.SplitName("Willia", "Saqandie")
+check("two-part name kept", a == "Willia" and b == "Saqandie")
+a, b = ns.SplitName("Willia")
+check("first name alone", a == "Willia" and b == nil)
+a, b = ns.SplitName(H.secret(), "Saqandie")
+check("secret first name gives nothing", a == nil and b == nil)
+check("full name for display", ns.FullName({ name = "Willia", surname = "Saqandie" }) == "Willia Saqandie")
+check("first name only until surname known", ns.FullName({ name = "Willia" }) == "Willia")
+
+-- ---------------------------------------------------------------------------
+section("Surnames: two players, same first name")
+local _, w1 = ns.List:Upsert({ guid = "Player-4710-0000W111", name = "Willia", surname = "Saqandie", class = "ROGUE" })
+local _, w2 = ns.List:Upsert({ guid = "Player-4710-0000W222", name = "Willia", surname = "Ravenholt", class = "MAGE" })
+check("kept as two entries", w1 ~= w2 and w1.key ~= w2.key)
+local k1 = ns.List:Find(nil, "Willia Saqandie")
+local k2 = ns.List:Find(nil, "Willia", "Ravenholt")
+check("full name finds the right one", k1 == w1.key and k2 == w2.key)
+local kAmb, eAmb, nAmb = ns.List:Find(nil, "Willia")
+check("bare first name is ambiguous", kAmb == nil and eAmb == nil and nAmb == 2, tostring(nAmb))
+check("guid wins regardless of name", ns.List:Find("Player-4710-0000W222", "Willia", "Saqandie") == w2.key)
+-- A third Willia (new GUID) seen on a nameplate is a stranger, not either of them.
+local strangerKey = ns.List:Find("Player-4710-0000W333", "Willia", "Stranger")
+check("a third Willia is a stranger", strangerKey == nil)
+local strangerKey2 = ns.List:Find("Player-4710-0000W333", "Willia")
+check("a third Willia with no surname is still a stranger", strangerKey2 == nil)
+
+-- ---------------------------------------------------------------------------
+section("Surnames: the radar")
+resetWorld()
+H.units["nameplate5"] = { name = "Willia", surname = "Stranger", guid = "Player-4710-0000W333",
+	level = 30, class = "WARRIOR", className = "Warrior", race = "Orc", isPlayer = true, canAttack = true }
+step()
+check("stranger with a shared first name is not flagged", ns.Radar:Get(w1.key) == nil and ns.Radar:Get(w2.key) == nil)
+-- An old entry with no surname learns it on sight.
+check("Pumpdaddy had no surname yet", entry.surname == nil)
+H.units["nameplate1"] = warrior({ surname = "Grimtusk" })
+step()
+check("surname learned on sight", entry.surname == "Grimtusk", entry.surname)
+check("shown as the full name", ns.FullName(entry) == "Pumpdaddy Grimtusk")
+-- GUID unreadable, full name readable: still recognised.
+resetWorld()
+H.units["nameplate1"] = { name = "Willia", surname = "Saqandie", guid = H.secret(), level = 40,
+	class = "ROGUE", isPlayer = true, canAttack = true }
+step()
+check("secret guid, full name still matches", ns.Radar:Get(w1.key) ~= nil)
+-- GUID unreadable and only a first name shared by two: not guessed.
+resetWorld()
+H.units["nameplate1"] = { name = "Willia", guid = H.secret(), level = 40, isPlayer = true, canAttack = true }
+step()
+check("secret guid, ambiguous first name: no guess", ns.Radar:Get(w1.key) == nil and ns.Radar:Get(w2.key) == nil)
+
+-- ---------------------------------------------------------------------------
+section("Surnames: death recap")
+clearPrompts()
+resetWorld()
+H.now = H.now + 600
+H.units["nameplate4"] = { name = "Morgath", surname = "Bloodfang", guid = "Player-4710-0000MRG1", level = 44,
+	class = "WARLOCK", className = "Warlock", race = "Undead", isPlayer = true, canAttack = true }
+H.recap = {
+	{ sourceName = "Morgath", sourceGUID = "Player-4710-0000MRG1", spellName = "Shadow Bolt", spellId = 686,
+	  amount = 900, overkill = 50, event = "SPELL_DAMAGE", timestamp = H.now },
+	{ sourceName = "Kelra Dawnmere", sourceGUID = "Player-4710-0000KLR1", spellName = "Frostbolt", spellId = 116,
+	  amount = 300, overkill = -1, event = "SPELL_DAMAGE", timestamp = H.now },
+}
+H.fire("PLAYER_DEAD")
+H.runTimers(0.2)
+local labels = promptLabels()
+check("killer's surname read from his nameplate", labels:find("Morgath Bloodfang", 1, true) ~= nil, labels)
+check("his level and class shown", labels:find("44 Warlock", 1, true) ~= nil, labels)
+check("joined recap name split and shown", labels:find("Kelra Dawnmere", 1, true) ~= nil, labels)
+for _, row in ipairs(ns.Prompt._rows()) do
+	if row:IsShown() and (row.label:GetText() or ""):find("Morgath", 1, true) then row.add:Click() end
+end
+local _, morg = ns.List:Find("Player-4710-0000MRG1")
+check("added with surname, level and race", morg and morg.surname == "Bloodfang" and morg.level == 44 and morg.race == "Undead")
+check("added killer counts their kill", morg and morg.theyKilledMe == 1)
+clearPrompts()
+
+-- ---------------------------------------------------------------------------
+section("Surnames: commands and honor messages")
+H.clearOutput()
+SlashCmdList.PERSONALVENDETTA("scum Willia")
+check("ambiguous first name asks for the surname", H.outputContains("2 people on your list are called Willia"))
+check("nobody marked by the ambiguous command", not w1.scum and not w2.scum)
+SlashCmdList.PERSONALVENDETTA("scum Willia Ravenholt")
+check("full name marks the right one", w2.scum == true and not w1.scum)
+SlashCmdList.PERSONALVENDETTA("unscum Willia Ravenholt")
+local w1k0, w2k0 = w1.iKilledThem, w2.iKilledThem
+H.now = H.now + 600
+H.fire("CHAT_MSG_COMBAT_HONOR_GAIN", "Willia dies, honorable kill Rank: Scout (Estimated Honor Points: 14)")
+check("honor message with a shared first name credits nobody", w1.iKilledThem == w1k0 and w2.iKilledThem == w2k0)
+H.fire("CHAT_MSG_COMBAT_HONOR_GAIN", "Willia Saqandie dies, honorable kill Rank: Scout (Estimated Honor Points: 14)")
+check("honor message with the full name credits the right one", w1.iKilledThem == w1k0 + 1 and w2.iKilledThem == w2k0)
+
+-- ---------------------------------------------------------------------------
+section("Post-fight prompt")
+clearPrompts()
+resetWorld()
+ns.db.settings.promptAfterFight = true
+H.now = H.now + 4000 -- clear of any earlier skip memory
+local function fight(units, opts)
+	opts = opts or {}
+	for k, v in pairs(units) do H.units[k] = v end
+	H.inCombat = true
+	H.fire("PLAYER_REGEN_DISABLED")
+	ns.Fights._scan()
+	if opts.before then opts.before() end
+	ns.Fights._scan()
+	H.inCombat = false
+	H.fire("PLAYER_REGEN_ENABLED")
+	H.runTimers(1)
+end
+local brute = { name = "Drogbar", surname = "Skullsplit", guid = "Player-4710-0000DRG1", level = 39,
+	class = "WARRIOR", className = "Warrior", race = "Orc", isPlayer = true, canAttack = true, targets = "player" }
+fight({ nameplate6 = brute }, { before = function() brute.dead = true end })
+local cur = ns.Prompt._current()
+check("prompt after surviving", _G.PersonalVendettaPrompt:IsShown() and cur and cur.mode == "fight")
+labels = promptLabels()
+check("he is offered by full name", labels:find("Drogbar Skullsplit", 1, true) ~= nil, labels)
+check("marked as killed by you", labels:find("(you killed them)", 1, true) ~= nil, labels)
+check("fight wording, not death wording", (_G.PersonalVendettaPrompt.subtitle:GetText() or ""):find("survived", 1, true) ~= nil)
+ns.Prompt._rows()[1].add:Click()
+local _, drog = ns.List:Find("Player-4710-0000DRG1")
+check("added", drog ~= nil)
+check("his kills on you stay 0", drog and drog.theyKilledMe == 0)
+check("your kill counted", drog and drog.iKilledThem == 1)
+check("last seen set", drog and drog.lastSeen == time())
+clearPrompts()
+
+resetWorld()
+fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1", level = 30,
+	isPlayer = true, canAttack = true, targets = "player" } })
+labels = promptLabels()
+check("one who got away is offered too", labels:find("Survivor Quickfeet", 1, true) ~= nil, labels)
+check("but not marked as killed", labels:find("you killed", 1, true) == nil, labels)
+ns.Prompt._rows()[1].skip:Click()
+H.runTimers(1)
+resetWorld()
+fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+check("skipped player not offered again soon", not _G.PersonalVendettaPrompt:IsShown())
+H.now = H.now + 31 * 60
+resetWorld()
+fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+check("offered again after half an hour", _G.PersonalVendettaPrompt:IsShown())
+clearPrompts()
+
+resetWorld()
+fight({ nameplate6 = { name = "Duelist", surname = "Fairplay", guid = "Player-4710-0000DUE1", faction = "Alliance",
+	isPlayer = true, canAttack = true, targets = "player" } })
+check("same-faction duel opponent not offered", not _G.PersonalVendettaPrompt:IsShown())
+
+resetWorld()
+fight({ nameplate6 = { name = "Bystander", surname = "Idle", guid = "Player-4710-0000BYS1",
+	isPlayer = true, canAttack = true } })
+check("enemy who never targeted you not offered", not _G.PersonalVendettaPrompt:IsShown())
+
+resetWorld()
+fight({ nameplate1 = warrior({ targets = "player" }) })
+check("someone already on the list not offered", not _G.PersonalVendettaPrompt:IsShown())
+
+resetWorld()
+H.units.player.dead = true
+fight({ nameplate6 = { name = "Victor", surname = "Grim", guid = "Player-4710-0000VIC1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+H.units.player.dead = nil
+check("no fight prompt when the fight killed you", not (_G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "fight"))
+clearPrompts()
+
+resetWorld()
+H.instanceType = "pvp"
+fight({ nameplate6 = { name = "Bgguy", surname = "Flag", guid = "Player-4710-0000BG01",
+	isPlayer = true, canAttack = true, targets = "player" } })
+H.instanceType = "none"
+check("no fight prompt in a battleground", not _G.PersonalVendettaPrompt:IsShown())
+
+resetWorld()
+ns.db.settings.promptAfterFight = false
+fight({ nameplate6 = { name = "Ignored", surname = "Setting", guid = "Player-4710-0000IGN1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+check("setting off means no prompt", not _G.PersonalVendettaPrompt:IsShown())
+ns.db.settings.promptAfterFight = true
+
+-- A death while a fight prompt is open waits its turn.
+resetWorld()
+fight({ nameplate6 = { name = "First", surname = "Inline", guid = "Player-4710-0000FIR1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+check("fight prompt open", _G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "fight")
+H.now = H.now + 600
+H.recap = { { sourceName = "Second", sourceGUID = "Player-4710-0000SEC1", spellName = "Ambush", spellId = 8676,
+	amount = 999, overkill = 99, event = "SPELL_DAMAGE", timestamp = H.now } }
+H.fire("PLAYER_DEAD")
+H.runTimers(0.2)
+check("death offer queued, fight prompt still showing", ns.Prompt._current().mode == "fight" and #ns.Prompt._queue() == 1)
+ns.Prompt.Close()
+H.runTimers(1)
+check("death prompt shows next", _G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "death")
+clearPrompts()
+
+-- /vendetta add with no name adds your target.
+resetWorld()
+H.units["target"] = { name = "Targetted", surname = "Person", guid = "Player-4710-0000TGT1", level = 33,
+	class = "HUNTER", className = "Hunter", race = "Troll", isPlayer = true, canAttack = true }
+SlashCmdList.PERSONALVENDETTA("add")
+local _, tgt = ns.List:Find("Player-4710-0000TGT1")
+check("/vendetta add adds your target", tgt and ns.FullName(tgt) == "Targetted Person" and tgt.className == "Hunter")
+H.clearOutput()
+SlashCmdList.PERSONALVENDETTA("add")
+check("and won't add them twice", H.outputContains("already on the list"))
+
+-- ---------------------------------------------------------------------------
+section("Hit list: newest first, last seen")
+check("ago: never", ns.Ago(nil) == "never")
+check("ago: just now", ns.Ago(time() - 20) == "just now")
+check("ago: minutes", ns.Ago(time() - 5 * 60) == "5 min ago")
+check("ago: one hour", ns.Ago(time() - 3600) == "1 hour ago")
+check("ago: hours", ns.Ago(time() - 3 * 3600 - 100) == "3 hours ago")
+check("ago: one day", ns.Ago(time() - 86400 - 5) == "1 day ago")
+check("ago: days", ns.Ago(time() - 4 * 86400) == "4 days ago")
+local byDate = ns.List:ByDateAdded()
+local sorted = true
+for i = 2, #byDate do
+	if (byDate[i - 1].firstAdded or 0) < (byDate[i].firstAdded or 0) then sorted = false end
+end
+check("sorted newest first", sorted)
+check("newest on top is the last one added", byDate[1] == tgt, byDate[1] and ns.FullName(byDate[1]))
+ns.Settings:Open("list")
+local function listRowAt(n)
+	local rowsFound = {}
+	for _, f in ipairs(H.frames) do
+		if f.scum and f.tint and f.seen and f:IsShown() then rowsFound[#rowsFound + 1] = f end
+	end
+	return rowsFound[n]
+end
+local top = listRowAt(1)
+check("top row of the tab is the newest", top and top.entry == tgt)
+tgt.lastSeen = time() - 3 * 3600 - 60
+ns.Settings:Refresh()
+check("last seen shown as hours", top and (top.seen:GetText() or "") == "3 hours ago", top and top.seen:GetText())
+tgt.lastSeen = time() - 2 * 86400 - 60
+ns.Settings:Refresh()
+check("then as days", top and (top.seen:GetText() or "") == "2 days ago", top and top.seen:GetText())
+
+-- ---------------------------------------------------------------------------
+section("Notes")
+check("note button on the row", top and top.note ~= nil)
+check("empty note reads + Note", top and (top.note:GetText() or ""):find("+ Note", 1, true) ~= nil)
+top.note:Click()
+check("editor opens for that player", ns.Notes:IsOpen() and ns.Notes:EditingKey() == tgt.key)
+ns.Notes:Append("Ganked while leveling")
+ns.Notes:Append("Ganked while leveling")
+ns.Notes:Append("2v1")
+check("presets append once, comma separated", ns.Notes:_edit():GetText() == "Ganked while leveling, 2v1",
+	ns.Notes:_edit():GetText())
+ns.Notes:Save()
+check("saved to the player", tgt.note == "Ganked while leveling, 2v1", tgt.note)
+check("editor closed on save", not ns.Notes:IsOpen())
+check("button shows a note exists", (top.note:GetText() or ""):find("Note", 1, true) ~= nil and
+	(top.note:GetText() or ""):find("+", 1, true) == nil)
+ns.Notes:Open(tgt.key)
+ns.Notes:_edit():SetText("something else")
+_G.PersonalVendettaNotes:Hide()
+check("closing without Save keeps the old note", tgt.note == "Ganked while leveling, 2v1")
+ns.List:SetNote(tgt.key, "|cffff0000red|r |Hitem:19019|h[Thunderfury]|h \7 bell")
+check("escape codes and control bytes stripped", tgt.note and not tgt.note:find("|", 1, true) and not tgt.note:find("\7", 1, true), tgt.note)
+ns.List:SetNote(tgt.key, string.rep("x", 400))
+check("notes capped at 300 characters", #tgt.note == 300, #tgt.note)
+ns.List:SetNote(tgt.key, "   ")
+check("blank note clears it", tgt.note == nil)
+check("there are presets for 2v1 and 3v1", (function()
+	local has = {}
+	for _, p in ipairs(ns.Notes.presets) do has[p] = true end
+	return has["2v1"] and has["3v1"] and has["Ganked while leveling"] and has["While low HP"]
+		and has["While eating/drinking"] and has["During an escort quest"]
+end)())
+check("removed presets are gone", (function()
+	for _, p in ipairs(ns.Notes.presets) do
+		if p == "At a flight master" or p == "At a quest giver" or p == "Stealth opener" then return false end
+	end
+	return #ns.Notes.presets == 11
+end)())
+-- Notes ride along in the sighting message.
+ns.List:SetNote(entry.key, "Camped me at the flight master")
+resetWorld()
+H.clearOutput()
+H.units["nameplate1"] = warrior({ surname = "Grimtusk" })
+step()
+check("sighting message carries the note", H.outputContains("Camped me at the flight master"))
+
+-- ---------------------------------------------------------------------------
+section("Sharing: encoding")
+local tricky = { guid = "Player-4710-0000TRK1", name = "Tricky", surname = "Name", level = 41, class = "ROGUE",
+	className = "Rogue", race = "Gnome", scum = true, note = "a~b^c%d:e\nnew line", theyKilledMe = 3 }
+local round = ns.Share:Decode(ns.Share:Encode({ tricky }))
+check("round trip keeps fields", round and round[1] and round[1].name == "Tricky" and round[1].surname == "Name"
+	and round[1].level == 41 and round[1].class == "ROGUE" and round[1].scum == true and round[1].killedSharer == 3)
+check("round trip keeps awkward characters", round and round[1].note == "a~b^c%d:e\nnew line", round and round[1].note)
+local evil = "V1^" .. table.concat({ "NotAGuid", "Bad%7Cname", "", "999", "", "rogue", "", "", "", "%7Ccff0000x", "-5" }, "~")
+local ev = ns.Share:Decode(evil)
+check("bad guid dropped", ev and ev[1] and ev[1].guid == nil)
+check("pipes stripped from names", ev and ev[1] and not ev[1].name:find("|", 1, true))
+check("impossible level dropped", ev and ev[1] and ev[1].level == nil)
+check("lowercase class rejected", ev and ev[1] and ev[1].class == nil)
+check("negative counts clamped", ev and ev[1] and ev[1].killedSharer == 0)
+check("unknown version refused", ns.Share:Decode("V9^whatever") == nil)
+
+-- ---------------------------------------------------------------------------
+section("Sharing: sending")
+clearPrompts()
+H.inGroup = false
+H.clearOutput()
+check("can't share outside a group", ns.Share:Send() == false and H.outputContains("party or raid"))
+H.inGroup = true
+H.sent = {}
+local listSize = ns.List:Count()
+check("sharing starts in a party", ns.Share:Send() == true)
+for _ = 1, 200 do H.runTimers(1.1) ; if not ns.Share._sending() then break end end
+check("all messages sent", #H.sent >= 2, #H.sent)
+check("over the party channel", H.sent[1] and H.sent[1].channel == "PARTY")
+check("offer header first", H.sent[1] and H.sent[1].msg:sub(1, 2) == "O:")
+local tooLong = false
+for _, m in ipairs(H.sent) do if #m.msg > 255 then tooLong = true end end
+check("every message within the 255-byte cap", not tooLong)
+check("finish reported", H.outputContains("Hit list shared"))
+
+-- Throttling: the game says "slow down" once; nothing is lost.
+H.sent = {}
+H.sendResults = { 0, 3 }
+ns.Share:Send()
+for _ = 1, 200 do H.runTimers(1.6) ; if not ns.Share._sending() then break end end
+local chunkCount = tonumber(H.sent[1].msg:match("^O:%x+:(%d+):"))
+check("throttled message retried, none lost", #H.sent == chunkCount + 1, #H.sent .. " vs " .. tostring(chunkCount and chunkCount + 1))
+H.sendResults = { 11 }
+H.clearOutput()
+ns.Share:Send()
+check("lockdown stops sharing cleanly", not ns.Share._sending() and H.outputContains("blocked"))
+H.sendResults = {}
+
+-- ---------------------------------------------------------------------------
+section("Sharing: receiving")
+-- Capture one share, then play it back as if from a party member.
+H.sent = {}
+ns.Share:Send()
+for _ = 1, 200 do H.runTimers(1.1) ; if not ns.Share._sending() then break end end
+local msgs = {}
+for _, m in ipairs(H.sent) do msgs[#msgs + 1] = m.msg end
+
+-- Your own share coming back is ignored.
+ns.Share._onMessage(ns.Share.PREFIX, msgs[1], "PARTY", "Me")
+check("own share ignored", next(ns.Share._sessions) == nil)
+
+local function asFriend(msg)
+	if msg:sub(1, 2) == "O:" then
+		return (msg:gsub("^(O:%x+:%d+:%d+:)[^:]*:(.*)$", "%1Player-4710-0000FRND:Kaz%%20Ironvein"))
+	end
+	return msg
+end
+-- The receiver is missing three of the players the friend shares.
+local missing = { "Player-4710-0000DRG1", "Player-4710-0000TGT1", "Player-4710-0000MRG1" }
+local savedEntries = {}
+for _, g in ipairs(missing) do
+	savedEntries[g] = ns.db.list[g]
+	ns.List:Remove(g)
+end
+local before = ns.List:Count()
+-- Deliver chunks out of order, with a duplicate thrown in.
+local order = { 1 }
+for i = #msgs, 2, -1 do order[#order + 1] = i end
+order[#order + 1] = 2
+H.clearOutput()
+for _, i in ipairs(order) do ns.Share._onMessage(ns.Share.PREFIX, asFriend(msgs[i]), "PARTY", "Kaz") end
+check("announced who is sharing", H.outputContains("Kaz Ironvein is sharing their hit list"))
+local imp = _G.PersonalVendettaImport
+check("import prompt shown", imp and imp:IsShown())
+check("says how many are new", imp and (imp.body:GetText() or ""):find("3 new to you", 1, true) ~= nil, imp and imp.body:GetText())
+check("says how many you already have", imp and (imp.body:GetText() or ""):find((listSize - 3) .. " already on your list", 1, true) ~= nil)
+imp.yes:Click()
+check("only the new ones imported", ns.List:Count() == before + 3, ns.List:Count() .. " vs " .. (before + 3))
+local _, back = ns.List:Find("Player-4710-0000DRG1")
+check("imported with full name", back and ns.FullName(back) == "Drogbar Skullsplit")
+check("marked as shared by them", back and back.sharedBy == "Kaz Ironvein")
+check("their score with you starts clean", back and back.theyKilledMe == 0 and back.iKilledThem == 0)
+check("no duplicates anywhere", (function()
+	local seen = {}
+	for _, e in pairs(ns.db.list) do
+		local id = e.guid or ns.FullName(e)
+		if seen[id] then return false end
+		seen[id] = true
+	end
+	return true
+end)())
+-- Sharing the same list again: nothing new.
+H.clearOutput()
+for i = 1, #msgs do ns.Share._onMessage(ns.Share.PREFIX, asFriend(msgs[i]), "PARTY", "Kaz") end
+check("second share: all already on yours", H.outputContains("all " .. ns.List:Count() .. " already on yours")
+	or H.outputContains("already on yours"))
+-- Chunks for a share nobody announced are ignored.
+ns.Share._onMessage(ns.Share.PREFIX, "C:abcdef:1:junk", "PARTY", "Rando")
+check("stray chunk ignored", next(ns.Share._sessions) == nil)
+
+-- ---------------------------------------------------------------------------
+section("1.0 saves load in 1.1")
+PersonalVendettaDB.nameIndex = { pumpdaddy = entry.key }
+ns.InitDB()
+check("old saved name index dropped", PersonalVendettaDB.nameIndex == nil)
+check("lookups rebuilt from the list", ns.List:Find(nil, "Pumpdaddy Grimtusk") == entry.key)
+check("post-fight setting defaults on", ns.db.settings.promptAfterFight == true)
 
 -- ---------------------------------------------------------------------------
 say(string.format("\n%d passed, %d failed", passed, failed))

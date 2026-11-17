@@ -57,25 +57,73 @@ local function isEnemyPlayer(unit)
 	return false
 end
 
--- Returns entry, guid, name for a unit that is on the list, else nil.
+-- First name and surname of a unit. Forever's UnitName returns them as two
+-- values; Blizzard's own Forever code reads them from UnitNameUnmodified.
+local function unitNames(unit)
+	local fn = UnitNameUnmodified or UnitName
+	local ok, first, last = ns.try(fn, unit)
+	if not ok then return nil, nil end
+	return ns.SplitName(first, last)
+end
+Radar.UnitNames = unitNames
+
+-- Returns entry, guid, first, surname for a unit on the list, else nil.
 local function identify(unit)
 	if not isEnemyPlayer(unit) then return nil end
 
 	local _, guidRaw = ns.try(UnitGUID, unit)
-	local _, nameRaw = ns.try(UnitName, unit)
 	local guid = ns.str(guidRaw)
-	local name = ns.str(nameRaw)
-	if not guid and not name then return nil end
+	local first, last = unitNames(unit)
+	if not guid and not first then return nil end
 
-	local key, entry = ns.List:Find(guid, name)
+	local key, entry = ns.List:Find(guid, first, last)
 	if not entry then return nil end
-	return entry, guid, name
+	return entry, guid, first, last
+end
+
+-- Everything we can read off a unit right now, for anyone (on the list or
+-- not). Unreadable fields are simply left out.
+function Radar:ReadUnitInfo(unit)
+	local _, guidRaw = ns.try(UnitGUID, unit)
+	local first, last = unitNames(unit)
+	local info = { guid = ns.str(guidRaw), name = first, surname = last }
+
+	local ok, level = ns.try(UnitLevel, unit)
+	level = ok and ns.num(level) or nil
+	if level and level > 0 then
+		info.level = level
+	elseif level == -1 then
+		info.levelSkull = true
+	end
+	local _, className, classFile = ns.try(UnitClass, unit)
+	info.className = ns.str(className)
+	info.class = ns.str(classFile)
+	local _, raceName = ns.try(UnitRace, unit)
+	info.race = ns.str(raceName)
+	return info
+end
+
+-- The unit token currently showing this GUID, if any is in view.
+function Radar:FindUnitByGUID(guid)
+	guid = ns.str(guid)
+	if not guid then return nil end
+	local function check(unit)
+		local ok, g = ns.try(UnitGUID, unit)
+		return ok and ns.str(g) == guid
+	end
+	if check("target") then return "target" end
+	if check("mouseover") then return "mouseover" end
+	for i = 1, MAX_PLATES do
+		local unit = "nameplate" .. i
+		if check(unit) then return unit end
+	end
+	return nil
 end
 
 -- Top up what we know while we can actually see them.
 -- Returns levelFresh: whether the level shown is from this very sighting.
-local function enrich(entry, unit, guid, name)
-	local info = { guid = guid, name = name }
+local function enrich(entry, unit, guid, name, surname)
+	local info = { guid = guid, name = name, surname = surname }
 	local levelFresh = false
 
 	local ok, level = ns.try(UnitLevel, unit)
@@ -115,13 +163,13 @@ local function sweep()
 	local changed = false
 
 	local function consider(unit)
-		local entry, guid, name = identify(unit)
+		local entry, guid, name, surname = identify(unit)
 		if not entry then return end
 		local key = entry.key
 		if not key or seenThisSweep[key] then return end
 		seenThisSweep[key] = true
 
-		local levelFresh = enrich(entry, unit, guid, name)
+		local levelFresh = enrich(entry, unit, guid, name, surname)
 		local dead = isDead(unit)
 
 		local record = Radar.nearby[key]
@@ -206,7 +254,7 @@ function Radar:GetNearby()
 		if as ~= bs then return as end
 		local ak, bk = a.entry.theyKilledMe or 0, b.entry.theyKilledMe or 0
 		if ak ~= bk then return ak > bk end
-		return (a.entry.name or "") < (b.entry.name or "")
+		return ns.FullName(a.entry) < ns.FullName(b.entry)
 	end)
 	return t
 end
@@ -370,3 +418,4 @@ end)
 
 Radar.Sweep = sweep
 Radar.IsDead = isDead
+Radar.IsEnemyPlayer = isEnemyPlayer

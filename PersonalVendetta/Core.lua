@@ -12,7 +12,7 @@
 
 local ADDON, ns = ...
 
-ns.VERSION = "1.0"
+ns.VERSION = "1.1"
 ns.PREFIX = "|cff9933ffVendetta|r "
 
 -- Art. The icon ships in Media\; WoW finds icon.tga without the extension.
@@ -82,9 +82,9 @@ end
 local DEFAULTS = {
 	version = 1,
 	list = {},        -- key -> entry
-	nameIndex = {},   -- lowercased name -> key
 	settings = {
 		promptOnDeath = true,
+		promptAfterFight = true,
 		announceRepeat = true,
 		overlayShown = true,
 		overlayPoint = nil,
@@ -128,8 +128,57 @@ function ns.InitDB()
 	-- 0.5 let you hide the minimap button. It is always there now.
 	db.settings.minimap.hide = nil
 
+	-- 1.0 saved a name index; 1.1 rebuilds it in memory, surname-aware.
+	db.nameIndex = nil
+
 	ns.db = db
+	ns.List:Reindex()
 	return ns.db
+end
+
+-- ===========================================================================
+-- Names
+-- Forever characters have a first name and a surname. UnitName returns them
+-- as two values (the slot retail uses for the realm holds the surname), and
+-- some sources hand over both joined by Blizzard's separator. Everything in
+-- the addon goes through SplitName so both shapes end up the same.
+-- ===========================================================================
+
+local function separator()
+	local c = Constants and Constants.CharacterNameSeparatorConsts
+	local s = c and c.CHARACTERNAME_SURNAME_SEPARATOR
+	if type(s) == "string" and s ~= "" then return s end
+	return " " -- what Blizzard's own slash-command code says it is
+end
+ns.NameSeparator = separator
+
+-- (first, surname) from "First", ("First", "Last") or "First Last".
+function ns.SplitName(name, surname)
+	local first, last = ns.str(name), ns.str(surname)
+	if not first then return nil, nil end
+	if not last then
+		local sep = separator()
+		local i = string.find(first, sep, 1, true)
+		if i and i > 1 then
+			local rest = string.sub(first, i + #sep)
+			first = string.sub(first, 1, i - 1)
+			if rest ~= "" then last = rest end
+		end
+	end
+	return first, last
+end
+
+-- "First Last" for display, or just "First" while the surname is unknown.
+function ns.FullName(entryOrName, surname)
+	local first, last
+	if type(entryOrName) == "table" then
+		first, last = entryOrName.name, entryOrName.surname
+	else
+		first, last = entryOrName, surname
+	end
+	if not first then return "?" end
+	if last and last ~= "" then return first .. separator() .. last end
+	return first
 end
 
 -- ===========================================================================
@@ -139,30 +188,92 @@ end
 local List = {}
 ns.List = List
 
--- GUID is the durable identity; a name is the fallback when the GUID is
--- secret or missing, and the bridge for /target, which only speaks names.
-local function keyFor(guid, name)
+-- In-memory lookups, rebuilt from the saved list at login:
+--   byFull[ "first last" ] = key        (only once the surname is known)
+--   byFirst[ "first" ]     = { key = true, ... }
+local byFull, byFirst = {}, {}
+
+local function lower(s) return s and string.lower(s) or nil end
+
+local function indexEntry(key, entry)
+	local first = entry.name and lower(entry.name)
+	if first then
+		byFirst[first] = byFirst[first] or {}
+		byFirst[first][key] = true
+	end
+	if entry.name and entry.surname then
+		byFull[lower(ns.FullName(entry))] = key
+	end
+end
+
+local function unindexEntry(key, entry)
+	local first = entry.name and lower(entry.name)
+	if first and byFirst[first] then
+		byFirst[first][key] = nil
+		if next(byFirst[first]) == nil then byFirst[first] = nil end
+	end
+	if entry.name and entry.surname then
+		local full = lower(ns.FullName(entry))
+		if byFull[full] == key then byFull[full] = nil end
+	end
+end
+
+function List:Reindex()
+	byFull, byFirst = {}, {}
+	for key, entry in pairs(ns.db.list) do
+		entry.key = key
+		indexEntry(key, entry)
+	end
+end
+
+-- GUID is the durable identity. A name is the fallback when the GUID is
+-- secret or missing, and a manual add has nothing else.
+local function keyFor(guid, first, last)
 	local g = ns.str(guid)
 	if g and string.find(g, "^Player%-") then return g end
-	local n = ns.str(name)
-	if n then return "name:" .. string.lower(n) end
+	if first then return "name:" .. lower(ns.FullName(first, last)) end
 	return nil
 end
 ns.keyFor = keyFor
 
--- Find an existing entry by either identity, so a name-keyed entry gets
--- upgraded to its GUID the first time we see one.
-function List:Find(guid, name)
+-- Find an entry. Returns key, entry -- or nil, nil, count when a bare first
+-- name matches more than one person (count says how many).
+--
+-- Matching rules, in order:
+--   1. the GUID, when we have a usable one;
+--   2. the full name;
+--   3. the first name, only if exactly one entry could be that person.
+-- An entry that already has a GUID is never matched to a different GUID by
+-- name: two players called Willia are two players.
+function List:Find(guid, name, surname)
 	local db = ns.db
 	local g = ns.str(guid)
 	if g and db.list[g] then return g, db.list[g] end
 
-	local n = ns.str(name)
-	if n then
-		local mapped = db.nameIndex[string.lower(n)]
-		if mapped and db.list[mapped] then return mapped, db.list[mapped] end
-		local nameKey = "name:" .. string.lower(n)
-		if db.list[nameKey] then return nameKey, db.list[nameKey] end
+	local first, last = ns.SplitName(name, surname)
+	if not first then return nil, nil end
+
+	local function compatible(e)
+		if g and e.guid and e.guid ~= g then return false end
+		if last and e.surname and lower(e.surname) ~= lower(last) then return false end
+		return true
+	end
+
+	if last then
+		local k = byFull[lower(ns.FullName(first, last))]
+		local e = k and db.list[k]
+		if e and compatible(e) then return k, e end
+	end
+
+	local set = byFirst[lower(first)]
+	if set then
+		local found, n = nil, 0
+		for k in pairs(set) do
+			local e = db.list[k]
+			if e and compatible(e) then found, n = k, n + 1 end
+		end
+		if n == 1 then return found, db.list[found] end
+		if n > 1 then return nil, nil, n end
 	end
 	return nil, nil
 end
@@ -173,25 +284,28 @@ function List:Count()
 	return n
 end
 
--- Create or update an entry. info may carry name, realm, guid, level,
--- class, className, race.
+-- Create or update an entry. info may carry guid, name, surname (or a
+-- joined "First Last" name), level, levelSkull, class, className, race.
 function List:Upsert(info)
 	local db = ns.db
 	local guid = ns.str(info.guid)
-	local name = ns.str(info.name)
-	if not guid and not name then return nil, nil end
+	local first, last = ns.SplitName(info.name, info.surname)
+	if not guid and not first then return nil, nil end
 
-	local key, entry = self:Find(guid, name)
+	local key, entry = self:Find(guid, first, last)
 
 	-- Promote a name-keyed entry to its real GUID once we learn it.
 	if key and guid and string.find(key, "^name:") then
+		unindexEntry(key, entry)
 		db.list[guid] = entry
 		db.list[key] = nil
 		key = guid
+	elseif key then
+		unindexEntry(key, entry)
 	end
 
 	if not key then
-		key = keyFor(guid, name)
+		key = keyFor(guid, first, last)
 		if not key then return nil, nil end
 		entry = {
 			key = key,
@@ -207,8 +321,9 @@ function List:Upsert(info)
 	entry.key = key
 
 	entry.guid = guid or entry.guid
-	entry.name = name or entry.name
-	entry.realm = ns.str(info.realm) or entry.realm
+	entry.name = first or entry.name
+	entry.surname = last or entry.surname
+	entry.realm = nil -- older versions had a field for this; Forever has surnames
 	-- The client reports -1 ("??") for anyone 10+ levels above you. That is
 	-- exactly when an old cached number would lie to you, so it is stored
 	-- as its own fact rather than ignored.
@@ -225,19 +340,14 @@ function List:Upsert(info)
 	entry.className = ns.str(info.className) or entry.className
 	entry.race = ns.str(info.race) or entry.race
 
-	if entry.name then
-		db.nameIndex[string.lower(entry.name)] = key
-	end
-
+	indexEntry(key, entry)
 	return key, entry
 end
 
 function List:Remove(guid, name)
-	local key, entry = self:Find(guid, name)
-	if not key then return false end
-	if entry and entry.name then
-		ns.db.nameIndex[string.lower(entry.name)] = nil
-	end
+	local key, entry, count = self:Find(guid, name)
+	if not key then return false, count end
+	unindexEntry(key, entry)
 	ns.db.list[key] = nil
 	ns.Fire("LIST_CHANGED")
 	return true
@@ -245,7 +355,7 @@ end
 
 function List:Wipe()
 	ns.db.list = {}
-	ns.db.nameIndex = {}
+	byFull, byFirst = {}, {}
 	ns.Fire("LIST_CHANGED")
 end
 
@@ -254,6 +364,21 @@ function List:RecordTheirKill(info)
 	if not entry then return nil end
 	entry.theyKilledMe = (entry.theyKilledMe or 0) + 1
 	entry.lastKilledMe = time()
+	entry.lastSeen = time() -- they were standing over you
+	ns.Fire("LIST_CHANGED")
+	return entry
+end
+
+-- Someone you fought and survived. They have not killed you, so their
+-- count stays where it is; yours goes up if you saw them drop.
+function List:AddFromFight(info)
+	local key, entry = self:Upsert(info)
+	if not entry then return nil end
+	if info.killedByMe then
+		entry.iKilledThem = (entry.iKilledThem or 0) + 1
+		entry.lastIKilledThem = time()
+	end
+	entry.lastSeen = time()
 	ns.Fire("LIST_CHANGED")
 	return entry
 end
@@ -266,7 +391,7 @@ local KILL_DEDUPE = 45
 -- Returns entry, counted. counted is false when this kill was already in.
 -- force skips the dedupe window, for hand corrections.
 function List:RecordMyKill(info, force)
-	local key, entry = self:Find(ns.str(info.guid), ns.str(info.name))
+	local key, entry = self:Find(ns.str(info.guid), ns.str(info.name), ns.str(info.surname))
 	if not entry then return nil, false end
 
 	local now = time()
@@ -289,15 +414,40 @@ function List:SetScum(key, isScum)
 	return entry
 end
 
-function List:Adjust(name, field, delta)
-	local key, entry = self:Find(nil, name)
+-- Notes: what this person did. Plain text, kept short.
+ns.NOTE_MAX = 300
+
+function ns.CleanText(s, max)
+	s = ns.str(s)
+	if not s then return nil end
+	-- No escape sequences (colours, textures, links) and no control bytes:
+	-- notes can arrive from other players through sharing.
+	s = string.gsub(s, "|", "/")
+	s = string.gsub(s, "[%z\1-\9\11-\31\127]", "")
+	s = string.gsub(s, "^%s+", "")
+	s = string.gsub(s, "%s+$", "")
+	if max and #s > max then s = string.sub(s, 1, max) end
+	if s == "" then return nil end
+	return s
+end
+
+function List:SetNote(key, text)
+	local entry = key and ns.db.list[key]
 	if not entry then return nil end
+	entry.note = ns.CleanText(text, ns.NOTE_MAX)
+	ns.Fire("LIST_CHANGED")
+	return entry
+end
+
+function List:Adjust(name, field, delta)
+	local key, entry, count = self:Find(nil, name)
+	if not entry then return nil, count end
 	entry[field] = math.max(0, (entry[field] or 0) + delta)
 	ns.Fire("LIST_CHANGED")
 	return entry
 end
 
--- Entries sorted worst-offender first, for display.
+-- Entries sorted worst-offender first.
 function List:Sorted()
 	local t = {}
 	for key, entry in pairs(ns.db.list) do
@@ -307,9 +457,41 @@ function List:Sorted()
 	table.sort(t, function(a, b)
 		local ak, bk = a.theyKilledMe or 0, b.theyKilledMe or 0
 		if ak ~= bk then return ak > bk end
-		return (a.name or "") < (b.name or "")
+		return ns.FullName(a) < ns.FullName(b)
 	end)
 	return t
+end
+
+-- Entries newest first: the order you added them in, latest on top.
+function List:ByDateAdded()
+	local t = {}
+	for key, entry in pairs(ns.db.list) do
+		entry.key = key
+		t[#t + 1] = entry
+	end
+	table.sort(t, function(a, b)
+		local at, bt = a.firstAdded or 0, b.firstAdded or 0
+		if at ~= bt then return at > bt end
+		return ns.FullName(a) < ns.FullName(b)
+	end)
+	return t
+end
+
+-- "just now", "12 min ago", "3 hours ago", "2 days ago", or "never".
+function ns.Ago(t)
+	if not t then return "never" end
+	local d = time() - t
+	if d < 60 then return "just now" end
+	if d < 3600 then
+		local m = math.floor(d / 60)
+		return m .. " min ago"
+	end
+	if d < 86400 then
+		local h = math.floor(d / 3600)
+		return h == 1 and "1 hour ago" or (h .. " hours ago")
+	end
+	local days = math.floor(d / 86400)
+	return days == 1 and "1 day ago" or (days .. " days ago")
 end
 
 -- ===========================================================================

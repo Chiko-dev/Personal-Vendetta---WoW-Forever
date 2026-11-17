@@ -160,7 +160,6 @@ end
 function _G.UnitIsEnemy(_, unit) local x = u(unit) ; return x and x.isPlayer ~= false and x.enemy ~= false or false end
 function _G.UnitIsDeadOrGhost(unit) local x = u(unit) ; return x and x.dead or false end
 H.groupSize = 0
-function _G.IsInRaid() return false end
 function _G.GetNumGroupMembers() return H.groupSize end
 
 function _G.UnitExists(unit) return u(unit) ~= nil end
@@ -168,11 +167,17 @@ function _G.UnitIsPlayer(unit) local x = u(unit) ; return x and x.isPlayer ~= fa
 -- Like the real client: a corpse cannot be attacked.
 function _G.UnitCanAttack(_, unit) local x = u(unit) ; return x and x.canAttack ~= false and not x.dead or false end
 function _G.UnitGUID(unit) local x = u(unit) ; return x and x.guid or nil end
-function _G.UnitName(unit) local x = u(unit) ; if not x then return nil end return x.name, x.realm end
+-- Forever returns (first name, surname); the realm slot holds the surname.
+function _G.UnitName(unit) local x = u(unit) ; if not x then return nil end return x.name, x.surname end
+function _G.UnitNameUnmodified(unit) return _G.UnitName(unit) end
+_G.Constants = { CharacterNameSeparatorConsts = { CHARACTERNAME_SURNAME_SEPARATOR = " " } }
 function _G.UnitLevel(unit) local x = u(unit) ; return x and x.level or nil end
 function _G.UnitClass(unit) local x = u(unit) ; if not x then return nil end return x.className, x.class end
 function _G.UnitRace(unit) local x = u(unit) ; if not x then return nil end return x.race, x.race end
-function _G.UnitFactionGroup(unit) local x = u(unit) ; return x and x.faction or "Alliance" end
+function _G.UnitFactionGroup(unit)
+	if unit == "player" then return "Alliance" end
+	local x = u(unit) ; return x and (x.faction or "Horde") or nil
+end
 function _G.UnitIsDead(unit) local x = u(unit) ; return x and x.dead or false end
 
 H.units.player = { name = "Me", guid = "Player-9999-MEMEME", isPlayer = true, canAttack = false }
@@ -244,6 +249,23 @@ _G.Settings = {
 	OpenToCategory = function(id) H.openedCategory = id end,
 }
 H.cvars.nameplateShowAll = "1"
+
+-- ---------------------------------------------------------------- v1.1
+H.inGroup, H.inRaidGroup = false, false
+function _G.IsInGroup() return H.inGroup end
+function _G.IsInRaid() return H.inRaidGroup end
+H.sent = {}
+H.sendResults = {}   -- queue of results to return; empty means success
+_G.C_ChatInfo = {
+	RegisterAddonMessagePrefix = function(p) H.prefix = p ; return 0 end,
+	SendAddonMessage = function(prefix, msg, channel)
+		local res = table.remove(H.sendResults, 1) or 0
+		if res == 0 then
+			H.sent[#H.sent + 1] = { prefix = prefix, msg = msg, channel = channel }
+		end
+		return res
+	end,
+}
 function _G.GetBuildInfo() return "1.60.1", "70009", "Nov 2026", 16001 end
 _G.date = function(fmt) return "2026-11-15 00:00:00" end
 
