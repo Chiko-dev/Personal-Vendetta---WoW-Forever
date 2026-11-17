@@ -221,13 +221,13 @@ local function buildGeneral(page)
 		function() return ns.db.settings.overlayShown ~= false end,
 		function(v) ns.Overlay.Toggle(v) end)
 
-	local ask = checkbox(page, "Ask me after an enemy player kills me", showWindow, 0,
+	local ask = checkbox(page, "Queue players who kill me in the To add tab", showWindow, 0,
 		function() return ns.db.settings.promptOnDeath end,
 		function(v) ns.db.settings.promptOnDeath = v end)
 	ask:ClearAllPoints()
 	ask:SetPoint("TOPLEFT", showWindow, "BOTTOMLEFT", 0, 2)
 
-	local askFight = checkbox(page, "Ask me after I survive a fight with an enemy player who came for me", ask, 0,
+	local askFight = checkbox(page, "Also queue enemy players I survive a fight with", ask, 0,
 		function() return ns.db.settings.promptAfterFight end,
 		function(v) ns.db.settings.promptAfterFight = v end)
 	askFight:ClearAllPoints()
@@ -438,7 +438,7 @@ local function buildList(page)
 
 	listEmpty = text(page, "GameFontDisable",
 		"Nobody yet. When an enemy player kills you in the open world, or you survive "
-		.. "a fight with one, you'll be asked whether to add them.", INNER - 20)
+		.. "a fight with one, they wait in the To add tab of the floating window.", INNER - 20)
 	listEmpty:SetPoint("TOP", holder, "TOP", 0, -40)
 	listEmpty:SetJustifyH("CENTER")
 

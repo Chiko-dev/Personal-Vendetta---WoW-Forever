@@ -1,18 +1,34 @@
 --[[-------------------------------------------------------------------------
   Personal Vendetta -- Overlay
-  The floating window. Collapses to a title bar when nobody from the list is
-  near you, and expands with a flash and a sound when someone turns up.
+  The floating window, with two tabs:
+
+    Nearby  -- live tracking. Collapses to its header when nobody from the
+               list is around; expands with a flash and a horn when someone
+               turns up. Each row has a Note button.
+    To add  -- the review queue. Players who killed you, and players you
+               survived a fight with, wait here instead of in a popup, so
+               nothing ever jumps in front of you mid-fight. The tab glows
+               while there is someone you haven't looked at. Each row has
+               Scum, Note, Skip and Add.
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
 
-local MAX_ROWS = 10
+local WIDTH = 340
+local HEADER_HEIGHT = 24
+local MAX_ROWS = 10          -- Nearby rows
 local ROW_HEIGHT = 20
-local HEADER_HEIGHT = 22
-local WIDTH = 310
+local ADD_ROWS = 6           -- To add rows visible at once (mouse wheel for more)
+local ADD_ROW_HEIGHT = 34
+local FOOTER_HEIGHT = 28
 
-local frame, rows
-local pendingFlash = {}
+local frame, rows, addRows
+local tabs = {}
+local addPage
+local currentTab = "near"
+local addOffset = 0
+local pendingFlash = {}      -- list keys to flash on the Nearby tab
+local newPending = {}        -- queue ids to flash on the To add tab
 
 -- ===========================================================================
 -- Position
@@ -35,7 +51,7 @@ local function restorePosition()
 end
 
 -- ===========================================================================
--- Flashing
+-- Flashing and glowing
 -- Hand-rolled on OnUpdate rather than an AnimationGroup: animation groups
 -- are created on frames, not on textures, and this needs no template
 -- support from the client at all.
@@ -84,6 +100,7 @@ local function startFlash(row)
 end
 
 local function setGlow(row, on)
+	if not row.glow then return end
 	on = on and true or false
 	if (row.glowing or false) == on then return end
 	row.glowing = on or nil
@@ -103,114 +120,35 @@ local function stopEffects(row)
 	row:SetScript("OnUpdate", nil)
 end
 
-local function solidTexture(parent, layer, r, g, b)
+local function solidTexture(parent, layer, r, g, b, a)
 	local t = parent:CreateTexture(nil, layer)
 	if t.SetColorTexture then
-		t:SetColorTexture(r, g, b, 1)
+		t:SetColorTexture(r, g, b, a or 1)
 	else
 		t:SetTexture("Interface\\Buttons\\WHITE8X8")
-		t:SetVertexColor(r, g, b, 1)
+		t:SetVertexColor(r, g, b, a or 1)
 	end
 	return t
 end
 
--- ===========================================================================
--- Construction
--- ===========================================================================
-
-local function buildRow(index, parent, anchor)
-	local row = CreateFrame("Frame", nil, parent)
-	row:SetSize(WIDTH - 16, ROW_HEIGHT)
-	if anchor then
-		row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, 0)
-	else
-		row:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -HEADER_HEIGHT)
-	end
-
-	row.flash = solidTexture(row, "BACKGROUND", 1, 0.15, 0.15)
-	row.flash:SetAllPoints()
-	row.flash:SetAlpha(0)
-
-	-- Scum glow: an additive red wash plus a bright bar on the left edge.
-	row.glow = solidTexture(row, "BORDER", 1, 0.08, 0.05)
-	row.glow:SetAllPoints()
-	if row.glow.SetBlendMode then row.glow:SetBlendMode("ADD") end
-	row.glow:SetAlpha(0)
-	row.glow:Hide()
-
-	row.edge = solidTexture(row, "ARTWORK", 1, 0.15, 0.1)
-	row.edge:SetPoint("TOPLEFT", -6, 0)
-	row.edge:SetPoint("BOTTOMLEFT", -6, 0)
-	row.edge:SetWidth(3)
-	row.edge:Hide()
-
-	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	row.name:SetPoint("LEFT", 2, 0)
-	row.name:SetJustifyH("LEFT")
-	row.name:SetWidth(166)
-	row.name:SetWordWrap(false)
-
-	row.detail = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	row.detail:SetPoint("LEFT", row.name, "RIGHT", 2, 0)
-	row.detail:SetJustifyH("LEFT")
-	row.detail:SetWidth(74)
-
-	row.score = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	row.score:SetPoint("RIGHT", -2, 0)
-	row.score:SetJustifyH("RIGHT")
-
-	-- Hover for the full picture (note included). Motion only: clicks pass
-	-- through to the window, so it still drags from anywhere.
-	if row.SetMouseMotionEnabled then row:SetMouseMotionEnabled(true) end
-	if row.SetMouseClickEnabled then row:SetMouseClickEnabled(false) end
-	row:SetScript("OnEnter", function(self)
-		if self.entry and ns.EntryTooltip then ns.EntryTooltip(self, self.entry, "ANCHOR_LEFT") end
-	end)
-	row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-
-	row:Hide()
-	return row
-end
-
-local function buildFrame()
-	frame = CreateFrame("Frame", "PersonalVendettaOverlay", UIParent, "BackdropTemplate")
-	frame:SetSize(WIDTH, HEADER_HEIGHT)
-	frame:SetMovable(true)
-	frame:EnableMouse(true)
-	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart", frame.StartMoving)
-	frame:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		savePosition()
-	end)
-	frame:SetClampedToScreen(true)
-
-	if frame.SetBackdrop then
-		frame:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\Buttons\\WHITE8X8",
-			edgeSize = 1,
-		})
-		frame:SetBackdropColor(0, 0, 0, 0.55)
-		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
-	end
-
-	frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	frame.title:SetPoint("LEFT", 8, 0)
-	frame.title:SetPoint("TOP", frame, "TOP", 0, -5)
-	frame.title:SetJustifyH("LEFT")
-
-	rows = {}
-	for i = 1, MAX_ROWS do
-		rows[i] = buildRow(i, frame, rows[i - 1])
-	end
-
-	restorePosition()
-	return frame
+-- A compact flat button that needs no template, sized for this window.
+local function flatButton(parent, label, w, h, r, g, b)
+	local btn = CreateFrame("Button", nil, parent)
+	btn:SetSize(w, h or 18)
+	btn.bg = solidTexture(btn, "BACKGROUND", r or 0.25, g or 0.18, b or 0.32, 0.9)
+	btn.bg:SetAllPoints()
+	local hl = solidTexture(btn, "HIGHLIGHT", 1, 1, 1, 0.15)
+	hl:SetAllPoints()
+	btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	btn.text:SetPoint("CENTER", 0, 0)
+	btn.text:SetText(label)
+	btn.SetLabel = function(self, t) self.text:SetText(t) end
+	btn.GetLabel = function(self) return self.text:GetText() end
+	return btn
 end
 
 -- ===========================================================================
--- Rendering
+-- Shared formatting
 -- ===========================================================================
 
 local function describe(entry)
@@ -239,27 +177,288 @@ local function levelText(entry, record)
 end
 ns.LevelText = levelText
 
-local function refresh()
-	if not frame then return end
+-- ===========================================================================
+-- Nearby rows
+-- ===========================================================================
 
-	local near = ns.Radar and ns.Radar:GetNearby() or {}
-	local total = ns.List:Count()
-	local count = ns.Radar and ns.Radar:Count() or 0 -- the living ones
-
-	local scumNear = 0
-	for _, record in ipairs(near) do
-		if record.entry.scum and not record.dead then scumNear = scumNear + 1 end
+local function buildRow(index, parent, anchor)
+	local row = CreateFrame("Frame", nil, parent)
+	row:SetSize(WIDTH - 16, ROW_HEIGHT)
+	if anchor then
+		row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, 0)
+	else
+		row:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -HEADER_HEIGHT)
 	end
 
-	if count > 0 then
-		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cffff4444%d near|r%s", count,
-			scumNear > 0 and string.format("  %s%s %d scum|r", ns.SKULL, ns.SCUM_COLOR, scumNear) or ""))
-		frame:SetBackdropBorderColor(0.9, 0.2, 0.2, 0.95)
-	else
-		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cff888888%d on the list|r", total))
+	row.flash = solidTexture(row, "BACKGROUND", 1, 0.15, 0.15)
+	row.flash:SetAllPoints()
+	row.flash:SetAlpha(0)
+
+	-- Scum glow: an additive red wash plus a bright bar on the left edge.
+	row.glow = solidTexture(row, "BORDER", 1, 0.08, 0.05)
+	row.glow:SetAllPoints()
+	if row.glow.SetBlendMode then row.glow:SetBlendMode("ADD") end
+	row.glow:SetAlpha(0)
+	row.glow:Hide()
+
+	row.edge = solidTexture(row, "ARTWORK", 1, 0.15, 0.1)
+	row.edge:SetPoint("TOPLEFT", -6, 0)
+	row.edge:SetPoint("BOTTOMLEFT", -6, 0)
+	row.edge:SetWidth(3)
+	row.edge:Hide()
+
+	-- Note, right on the row: write down what they did without leaving the
+	-- window.
+	row.note = flatButton(row, "+Note", 38, 16)
+	row.note:SetPoint("RIGHT", -1, 0)
+	row.note:SetScript("OnClick", function()
+		if row.entry and ns.Notes then ns.Notes:Open(row.entry.key) end
+	end)
+	row.note:SetScript("OnEnter", function(self)
+		if not GameTooltip or not row.entry then return end
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		if row.entry.note then
+			GameTooltip:AddLine("Note", 1, 0.82, 0.3)
+			GameTooltip:AddLine(row.entry.note, 1, 1, 1, true)
+			GameTooltip:AddLine("Click to edit.", 0.6, 0.6, 0.6)
+		else
+			GameTooltip:AddLine("Add a note: what did they do?", 1, 1, 1)
+		end
+		GameTooltip:Show()
+	end)
+	row.note:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
+	row.score = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	row.score:SetPoint("RIGHT", row.note, "LEFT", -6, 0)
+	row.score:SetJustifyH("RIGHT")
+
+	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.name:SetPoint("LEFT", 2, 0)
+	row.name:SetJustifyH("LEFT")
+	row.name:SetWidth(158)
+	row.name:SetWordWrap(false)
+
+	row.detail = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	row.detail:SetPoint("LEFT", row.name, "RIGHT", 2, 0)
+	row.detail:SetPoint("RIGHT", row.score, "LEFT", -4, 0)
+	row.detail:SetJustifyH("LEFT")
+	row.detail:SetWordWrap(false)
+
+	-- Hover for the full picture (note included). Motion only: clicks pass
+	-- through to the window, so it still drags from anywhere but the button.
+	if row.SetMouseMotionEnabled then row:SetMouseMotionEnabled(true) end
+	if row.SetMouseClickEnabled then row:SetMouseClickEnabled(false) end
+	row:SetScript("OnEnter", function(self)
+		if self.entry and ns.EntryTooltip then ns.EntryTooltip(self, self.entry, "ANCHOR_LEFT") end
+	end)
+	row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
+	row:Hide()
+	return row
+end
+
+-- ===========================================================================
+-- To add rows
+-- ===========================================================================
+
+local refresh -- forward
+
+local function buildAddRow(index, parent)
+	local row = CreateFrame("Frame", nil, parent)
+	row:SetSize(WIDTH - 16, ADD_ROW_HEIGHT)
+	row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(index - 1) * ADD_ROW_HEIGHT)
+
+	local stripe = solidTexture(row, "BACKGROUND", 1, 1, 1, (index % 2 == 0) and 0.05 or 0)
+	stripe:SetAllPoints()
+	row.flash = solidTexture(row, "BORDER", 1, 0.82, 0.2)
+	row.flash:SetAllPoints()
+	row.flash:SetAlpha(0)
+
+	-- [name            ] [x]Scum [Note] [Skip] [Add]
+	-- [killed you x2 ...]
+	row.add = flatButton(row, "Add", 34, 18, 0.15, 0.45, 0.15)
+	row.add:SetPoint("RIGHT", -1, 0)
+	row.skip = flatButton(row, "Skip", 32, 18, 0.3, 0.3, 0.3)
+	row.skip:SetPoint("RIGHT", row.add, "LEFT", -3, 0)
+	row.note = flatButton(row, "+Note", 38, 18)
+	row.note:SetPoint("RIGHT", row.skip, "LEFT", -3, 0)
+
+	row.scumText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.scumText:SetPoint("RIGHT", row.note, "LEFT", -4, 0)
+	row.scumText:SetText("Scum")
+	row.scumText:SetTextColor(1, 0.25, 0.25)
+	row.scum = ns.CreateCheckButton(row)
+	row.scum:SetSize(20, 20)
+	row.scum:SetPoint("RIGHT", row.scumText, "LEFT", 1, 0)
+	row.scum:SetScript("OnEnter", function(self) ns.ScumTooltip(self) end)
+	row.scum:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
+	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.name:SetPoint("TOPLEFT", 2, -4)
+	row.name:SetPoint("RIGHT", row.scum, "LEFT", -4, 0)
+	row.name:SetJustifyH("LEFT")
+	row.name:SetWordWrap(false)
+
+	row.detail = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	row.detail:SetPoint("BOTTOMLEFT", 2, 4)
+	row.detail:SetPoint("RIGHT", row.scum, "LEFT", -4, 0)
+	row.detail:SetJustifyH("LEFT")
+	row.detail:SetWordWrap(false)
+
+	row.scum:SetScript("OnClick", function(self)
+		if row.id then ns.Pending:SetScum(row.id, self:GetChecked() and true or false) end
+	end)
+	row.note:SetScript("OnClick", function()
+		if row.id and ns.Notes then ns.Notes:OpenPending(row.id) end
+	end)
+	row.skip:SetScript("OnClick", function()
+		if row.id then ns.Pending:Skip(row.id) end
+	end)
+	row.add:SetScript("OnClick", function()
+		if row.id then ns.Pending:Add(row.id) end
+	end)
+
+	row:EnableMouse(true)
+	row:SetScript("OnEnter", function(self)
+		if self.item and ns.PendingTooltip then ns.PendingTooltip(self, self.item) end
+	end)
+	row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+	row:EnableMouseWheel(true)
+	row:SetScript("OnMouseWheel", function(_, delta)
+		addOffset = addOffset - delta
+		refresh()
+	end)
+
+	row:Hide()
+	return row
+end
+
+-- ===========================================================================
+-- Tabs
+-- ===========================================================================
+
+local function animateTabs(self)
+	local unseen = ns.Pending and ns.Pending:UnseenCount() or 0
+	local glowOn = unseen > 0 and currentTab ~= "add"
+	if not glowOn then
+		tabs.add.glow:SetAlpha(0)
+		self:SetScript("OnUpdate", nil)
+		return
+	end
+	local wave = 0.5 + 0.5 * math.sin(GetTime() * 4)
+	tabs.add.glow:SetAlpha(0.25 + 0.55 * wave)
+end
+
+local function selectTab(which)
+	currentTab = (which == "add") and "add" or "near"
+	if ns.db then ns.db.settings.overlayTab = currentTab end
+	refresh()
+end
+
+local function buildTab(key, label)
+	local tab = CreateFrame("Button", nil, frame)
+	tab:SetSize(key == "add" and 86 or 74, HEADER_HEIGHT - 6)
+	tab.bg = solidTexture(tab, "BACKGROUND", 0.35, 0.2, 0.5, 0.35)
+	tab.bg:SetAllPoints()
+	tab.glow = solidTexture(tab, "BORDER", 1, 0.75, 0.15, 1)
+	tab.glow:SetAllPoints()
+	if tab.glow.SetBlendMode then tab.glow:SetBlendMode("ADD") end
+	tab.glow:SetAlpha(0)
+	tab.line = solidTexture(tab, "ARTWORK", 0.75, 0.45, 1, 1)
+	tab.line:SetPoint("BOTTOMLEFT", 0, 0)
+	tab.line:SetPoint("BOTTOMRIGHT", 0, 0)
+	tab.line:SetHeight(2)
+	local hl = solidTexture(tab, "HIGHLIGHT", 1, 1, 1, 0.12)
+	hl:SetAllPoints()
+	tab.text = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	tab.text:SetPoint("CENTER", 0, 0)
+	tab.text:SetText(label)
+	tab:SetScript("OnClick", function() selectTab(key) end)
+	tabs[key] = tab
+	return tab
+end
+
+-- ===========================================================================
+-- Construction
+-- ===========================================================================
+
+local function buildFrame()
+	frame = CreateFrame("Frame", "PersonalVendettaOverlay", UIParent, "BackdropTemplate")
+	frame:SetSize(WIDTH, HEADER_HEIGHT)
+	frame:SetMovable(true)
+	frame:EnableMouse(true)
+	frame:RegisterForDrag("LeftButton")
+	frame:SetScript("OnDragStart", frame.StartMoving)
+	frame:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		savePosition()
+	end)
+	frame:SetClampedToScreen(true)
+
+	if frame.SetBackdrop then
+		frame:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1,
+		})
+		frame:SetBackdropColor(0, 0, 0, 0.55)
 		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
 	end
 
+	frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	frame.title:SetPoint("TOPLEFT", 8, -6)
+	frame.title:SetJustifyH("LEFT")
+	frame.title:SetWidth(WIDTH - 86 - 74 - 24)
+	frame.title:SetWordWrap(false)
+
+	local addTab = buildTab("add", "To add")
+	addTab:SetPoint("TOPRIGHT", -4, -3)
+	local nearTab = buildTab("near", "Nearby")
+	nearTab:SetPoint("RIGHT", addTab, "LEFT", -3, 0)
+
+	rows = {}
+	for i = 1, MAX_ROWS do
+		rows[i] = buildRow(i, frame, rows[i - 1])
+	end
+
+	addPage = CreateFrame("Frame", nil, frame)
+	addPage:SetPoint("TOPLEFT", 8, -HEADER_HEIGHT)
+	addPage:SetSize(WIDTH - 16, ADD_ROWS * ADD_ROW_HEIGHT + FOOTER_HEIGHT)
+	addPage:EnableMouseWheel(true)
+	addPage:SetScript("OnMouseWheel", function(_, delta)
+		addOffset = addOffset - delta
+		refresh()
+	end)
+	addRows = {}
+	for i = 1, ADD_ROWS do
+		addRows[i] = buildAddRow(i, addPage)
+	end
+
+	addPage.empty = addPage:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	addPage.empty:SetPoint("TOPLEFT", 2, -6)
+	addPage.empty:SetPoint("TOPRIGHT", -2, -6)
+	addPage.empty:SetJustifyH("LEFT")
+	addPage.empty:SetWordWrap(true)
+	addPage.empty:SetText("Nobody to review. Players who kill you, or who you fight off, "
+		.. "wait here so you can add them when it suits you.")
+
+	addPage.addAll = flatButton(addPage, "Add all", 70, 20, 0.15, 0.45, 0.15)
+	addPage.skipAll = flatButton(addPage, "Skip all", 64, 20, 0.3, 0.3, 0.3)
+	addPage.info = addPage:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	addPage.addAll:SetScript("OnClick", function() ns.Pending:AddAll() end)
+	addPage.skipAll:SetScript("OnClick", function() ns.Pending:SkipAll() end)
+
+	currentTab = (ns.db and ns.db.settings.overlayTab == "add") and "add" or "near"
+	restorePosition()
+	return frame
+end
+
+-- ===========================================================================
+-- Rendering
+-- ===========================================================================
+
+local function renderNear()
+	local near = ns.Radar and ns.Radar:GetNearby() or {}
 	local shown = 0
 	for i = 1, MAX_ROWS do
 		local row = rows[i]
@@ -282,6 +481,7 @@ local function refresh()
 			end
 			row.score:SetText(string.format("|cffff6666%d|r/|cff66ff66%d|r",
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			row.note:SetLabel(entry.note and "|cffffd100Note|r" or "|cffaaaaaa+Note|r")
 			row.entry = entry
 			row:Show()
 
@@ -295,9 +495,133 @@ local function refresh()
 			row:Hide()
 		end
 	end
+	return shown
+end
 
-	-- Collapsed when quiet, expanded when there is something to show.
-	frame:SetHeight(HEADER_HEIGHT + (shown * ROW_HEIGHT) + (shown > 0 and 6 or 0))
+local function hideNear()
+	for i = 1, MAX_ROWS do
+		rows[i].entry = nil
+		stopEffects(rows[i])
+		rows[i]:Hide()
+	end
+end
+
+local function renderAdd()
+	local list = ns.Pending and ns.Pending:List() or {}
+	local total = #list
+	local maxOffset = math.max(0, total - ADD_ROWS)
+	if addOffset > maxOffset then addOffset = maxOffset end
+	if addOffset < 0 then addOffset = 0 end
+
+	local shown = 0
+	for i = 1, ADD_ROWS do
+		local row = addRows[i]
+		local it = list[addOffset + i]
+		if it then
+			shown = shown + 1
+			local r, g, b = ns.ClassColor(it.class)
+			local lvl = it.levelSkull and "|cffff3333??|r " or (it.level and ("|cffffffff" .. it.level .. "|r ") or "")
+			row.name:SetText((it.scum and (ns.SKULL .. " ") or "") .. lvl .. ns.FullName(it.name, it.surname))
+			row.name:SetTextColor(r, g, b)
+			local detail = ns.Pending:Describe(it)
+			if it.className then detail = "|cff999999" .. it.className .. "|r  " .. detail end
+			if it.note then detail = detail .. "  |cffffd100\"" .. it.note .. "\"|r" end
+			row.detail:SetText(detail)
+			row.scum:SetChecked(it.scum and true or false)
+			row.note:SetLabel(it.note and "|cffffd100Note|r" or "|cffaaaaaa+Note|r")
+			row.id, row.item = it.id, it
+			row:Show()
+			if newPending[it.id] then
+				newPending[it.id] = nil
+				startFlash(row)
+			end
+		else
+			row.id, row.item = nil, nil
+			stopEffects(row)
+			row:Hide()
+		end
+	end
+
+	addPage.empty:SetShown(total == 0)
+	addPage.addAll:SetShown(total > 0)
+	addPage.skipAll:SetShown(total > 0)
+	addPage.info:SetShown(total > 0)
+
+	local bodyHeight = (total == 0) and 34 or (shown * ADD_ROW_HEIGHT)
+	addPage.addAll:ClearAllPoints()
+	addPage.skipAll:ClearAllPoints()
+	addPage.info:ClearAllPoints()
+	addPage.addAll:SetPoint("TOPRIGHT", addPage, "TOPRIGHT", -1, -(bodyHeight + 4))
+	addPage.skipAll:SetPoint("RIGHT", addPage.addAll, "LEFT", -4, 0)
+	addPage.info:SetPoint("LEFT", addPage, "TOPLEFT", 2, -(bodyHeight + 14))
+	if total > ADD_ROWS then
+		addPage.info:SetText(string.format("%d-%d of %d, scroll for more",
+			addOffset + 1, math.min(total, addOffset + ADD_ROWS), total))
+	else
+		addPage.info:SetText(total == 1 and "1 waiting" or (total .. " waiting"))
+	end
+
+	return bodyHeight + ((total > 0) and FOOTER_HEIGHT or 0)
+end
+
+refresh = function()
+	if not frame then return end
+
+	local total = ns.List:Count()
+	local count = ns.Radar and ns.Radar:Count() or 0 -- the living ones
+	local pendingCount = ns.Pending and ns.Pending:Count() or 0
+
+	-- Looking at the To add tab counts as having seen everything in it.
+	if currentTab == "add" and frame:IsShown() and ns.Pending then
+		ns.Pending:MarkAllSeen(true)
+	end
+	local unseen = ns.Pending and ns.Pending:UnseenCount() or 0
+
+	local scumNear = 0
+	for _, record in ipairs(ns.Radar and ns.Radar:GetNearby() or {}) do
+		if record.entry.scum and not record.dead then scumNear = scumNear + 1 end
+	end
+
+	-- Header
+	if count > 0 then
+		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cffff4444%d near|r%s", count,
+			scumNear > 0 and string.format("  %s%s%d scum|r", ns.SKULL, ns.SCUM_COLOR, scumNear) or ""))
+		frame:SetBackdropBorderColor(0.9, 0.2, 0.2, 0.95)
+	else
+		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cff888888%d on list|r", total))
+		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
+	end
+
+	tabs.near.text:SetText(count > 0 and string.format("Nearby |cffff4444%d|r", count) or "Nearby")
+	tabs.add.text:SetText(pendingCount > 0 and string.format("To add |cffffd100%d|r", pendingCount) or "To add")
+	for key, tab in pairs(tabs) do
+		local on = (key == currentTab)
+		tab.bg:SetAlpha(on and 1 or 0.35)
+		tab.line:SetShown(on)
+	end
+
+	-- The To add tab glows while there is someone you haven't looked at.
+	if unseen > 0 and currentTab ~= "add" then
+		frame:SetScript("OnUpdate", animateTabs)
+	else
+		tabs.add.glow:SetAlpha(0)
+		frame:SetScript("OnUpdate", nil)
+	end
+
+	-- Body
+	local height
+	if currentTab == "add" then
+		hideNear()
+		addPage:Show()
+		height = HEADER_HEIGHT + renderAdd() + 4
+	else
+		addPage:Hide()
+		for i = 1, ADD_ROWS do stopEffects(addRows[i]) end
+		local shown = renderNear()
+		-- Collapsed when quiet, expanded when there is something to show.
+		height = HEADER_HEIGHT + (shown * ROW_HEIGHT) + (shown > 0 and 6 or 0)
+	end
+	frame:SetHeight(height)
 end
 
 local function alert(entries)
@@ -326,6 +650,11 @@ local function alert(entries)
 	-- One horn per batch: the scum one wins if any of them is scum.
 	if ns.Sound then ns.Sound:Play(anyScum and "scum" or "normal") end
 
+	-- Someone on the list is here: that matters more than the review queue.
+	if currentTab ~= "near" then
+		currentTab = "near"
+		if ns.db then ns.db.settings.overlayTab = "near" end
+	end
 	refresh()
 end
 
@@ -348,6 +677,13 @@ local function toggle(show)
 	ns.db.settings.overlayShown = show
 	if show then refresh() end
 	ns.Fire("SETTINGS_CHANGED")
+end
+
+-- Open the window on a given tab.
+local function showTab(which)
+	if not ensureFrame() then return end
+	toggle(true)
+	selectTab(which)
 end
 
 -- ===========================================================================
@@ -392,6 +728,8 @@ local function handleCommand(msg)
 		toggle()
 	elseif cmd == "list" then
 		printList()
+	elseif cmd == "review" or cmd == "toadd" then
+		showTab("add")
 	elseif cmd == "add" then
 		if arg == "" then
 			-- No name: add whoever you have targeted, with everything we can read.
@@ -451,7 +789,8 @@ local function handleCommand(msg)
 		ns.Print("v" .. ns.VERSION .. " status:")
 		print("  Core    " .. (ns.db and "|cff44ff44loaded|r" or "|cffff4444no database|r"))
 		print("  Deaths  " .. (ns.Deaths and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
-		print("  Prompt  " .. (ns.Prompt and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
+		print("  Queue   " .. (ns.Pending and ("|cff44ff44loaded|r, " .. ns.Pending:Count() .. " waiting")
+			or "|cffff4444MISSING|r"))
 		print("  Radar   " .. (ns.Radar and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
 		print("  Kills   " .. (ns.Kills and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
 			.. "   Fights " .. (ns.Fights and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
@@ -524,6 +863,7 @@ local function handleCommand(msg)
 	else
 		ns.Print("Commands:")
 		print("  |cffffd100/vendetta|r  toggle the window")
+		print("  |cffffd100/vendetta review|r  open the To add tab")
 		print("  |cffffd100/vendetta list|r  print the list, marking who is near")
 		print("  |cffffd100/vendetta add|r  add your current target")
 		print("  |cffffd100/vendetta add <first> <surname>|r  add someone by name")
@@ -555,8 +895,24 @@ ns.On("DB_READY", function()
 	toggle(ns.db.settings.overlayShown ~= false)
 end)
 
-ns.On("LIST_CHANGED", refresh)
-ns.On("RADAR_CHANGED", refresh)
+ns.On("LIST_CHANGED", function() refresh() end)
+ns.On("RADAR_CHANGED", function() refresh() end)
 ns.On("SIGHTED", alert)
+ns.On("PENDING_CHANGED", function(added)
+	if type(added) == "table" then
+		for _, it in ipairs(added) do newPending[it.id] = true end
+	end
+	refresh()
+end)
 
-ns.Overlay = { Toggle = toggle, Refresh = refresh }
+ns.Overlay = {
+	Toggle = toggle,
+	Refresh = function() refresh() end,
+	ShowTab = showTab,
+	SelectTab = function(which) selectTab(which) end,
+	CurrentTab = function() return currentTab end,
+	_addRows = function() return addRows end,
+	_rows = function() return rows end,
+	_tabs = function() return tabs end,
+	_addPage = function() return addPage end,
+}

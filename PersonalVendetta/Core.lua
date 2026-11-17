@@ -12,7 +12,7 @@
 
 local ADDON, ns = ...
 
-ns.VERSION = "1.1"
+ns.VERSION = "1.2"
 ns.PREFIX = "|cff9933ffVendetta|r "
 
 -- Art. The icon ships in Media\; WoW finds icon.tga without the extension.
@@ -100,6 +100,7 @@ local DEFAULTS = {
 		},
 	},
 	lastRecapSig = nil,
+	pending = {},     -- the To add queue
 }
 
 local function applyDefaults(target, defaults)

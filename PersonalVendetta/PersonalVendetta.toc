@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Personal |cff9933ffVendetta|r
 ## Notes: A hitman list for the people who have killed you in the open world. Not a warning for every enemy: only the ones who killed you.
-## Version: 1.1
+## Version: 1.2
 ## SavedVariablesPerCharacter: PersonalVendettaDB
 ## IconTexture: Interface\AddOns\PersonalVendetta\Media\icon
 ## AddonCompartmentFunc: PersonalVendetta_OnAddonCompartmentClick
@@ -9,12 +9,12 @@
 Core.lua
 Sound.lua
 Deaths.lua
-Prompt.lua
 Radar.lua
 Kills.lua
 Fights.lua
 Notes.lua
 Share.lua
+Pending.lua
 Overlay.lua
 Settings.lua
 Minimap.lua

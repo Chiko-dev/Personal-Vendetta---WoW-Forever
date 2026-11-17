@@ -48,6 +48,10 @@ local function showTooltip(self)
 	local near = ns.Radar and ns.Radar:Count() or 0
 	GameTooltip:AddLine(string.format("%d on the list%s", ns.List:Count(),
 		near > 0 and (", |cffff4444" .. near .. " near|r") or ""), 1, 1, 1)
+	local waiting = ns.Pending and ns.Pending:Count() or 0
+	if waiting > 0 then
+		GameTooltip:AddLine(string.format("|cffffd100%d waiting to be added|r (To add tab)", waiting))
+	end
 	GameTooltip:AddLine(" ")
 	GameTooltip:AddLine("|cffffd100Left-click|r  settings", 0.8, 0.8, 0.8)
 	GameTooltip:AddLine("|cffffd100Right-click|r  show/hide window", 0.8, 0.8, 0.8)

@@ -543,10 +543,8 @@ check("old key removed", ns.db.settings.soundOnSighting == nil)
 ns.db.settings.sound.enabled = true
 
 -- ---------------------------------------------------------------------------
-section("Prompt and commands")
-ns.Prompt.Show({ { name = "Testguy", guid = "Player-1-TEST", certain = true } })
-check("button reads Close", _G.PersonalVendettaPrompt.close:GetText() == "Close",
-	_G.PersonalVendettaPrompt.close:GetText())
+section("Commands")
+check("there is no popup window any more", _G.PersonalVendettaPrompt == nil)
 local before = entry.iKilledThem
 SlashCmdList.PERSONALVENDETTA("kill Pumpdaddy")
 check("/vendetta kill adds one", entry.iKilledThem == before + 1)
@@ -561,14 +559,34 @@ check("/vendetta options runs", (pcall(SlashCmdList.PERSONALVENDETTA, "options")
 -- v1.0
 -- ===========================================================================
 
--- ---------------------------------------------------------------------------
-section("Scum: ticked in the death prompt")
--- Earlier sections leave prompts unanswered; clear them so this starts clean.
-for _ = 1, 20 do
-	if not _G.PersonalVendettaPrompt or not _G.PersonalVendettaPrompt:IsShown() then break end
-	ns.Prompt.Close()
-	H.runTimers(1)
+-- The To add queue replaced the popup (1.2). Helpers for the tests below.
+local function clearQueue()
+	local q = ns.db.pending or {}
+	for i = #q, 1, -1 do q[i] = nil end
+	ns.Fire("PENDING_CHANGED")
 end
+local function queueText()
+	local out = {}
+	for _, it in ipairs(ns.Pending:List()) do
+		out[#out + 1] = table.concat({ ns.FullName(it.name, it.surname), tostring(it.level or ""),
+			it.className or "", ns.Pending:Describe(it) }, " ")
+	end
+	return table.concat(out, " | ")
+end
+-- The floating window's To add row showing this player.
+local function addRowFor(name)
+	ns.Overlay.Toggle(true)
+	ns.Overlay.SelectTab("add")
+	for _, row in ipairs(ns.Overlay._addRows()) do
+		if row:IsShown() and row.item and ns.FullName(row.item.name, row.item.surname):find(name, 1, true) then
+			return row
+		end
+	end
+end
+
+-- ---------------------------------------------------------------------------
+section("Scum: ticked in the To add tab")
+clearQueue()
 H.now = H.now + 600
 H.recap = {
 	{ sourceName = "Gankmaster", sourceGUID = "Player-4710-000GANK1",
@@ -580,23 +598,24 @@ H.recap = {
 }
 H.fire("PLAYER_DEAD")
 H.runTimers(0.2)
-local prows = ns.Prompt._rows()
-check("prompt has a Scum box on each row", prows[1].scum ~= nil and prows[2].scum ~= nil)
-check("Scum starts unticked", not prows[1].scum:GetChecked() and not prows[2].scum:GetChecked())
-local first = (prows[1].label:GetText() or ""):find("Gankmaster") and 1 or 2
-local second = 3 - first
-prows[first].scum:SetChecked(true)
-prows[first].add:Click()
-prows[second].add:Click()
+check("no popup appears", _G.PersonalVendettaPrompt == nil)
+check("both wait in the queue", ns.Pending:Count() == 2, ns.Pending:Count())
+local gRow, fRow = addRowFor("Gankmaster"), addRowFor("Fairfighter")
+check("each To add row has a Scum box", gRow and fRow and gRow.scum ~= nil and fRow.scum ~= nil)
+check("Scum starts unticked", gRow and fRow and not gRow.scum:GetChecked() and not fRow.scum:GetChecked())
+check("marked as a gank", queueText():find("gank", 1, true) ~= nil, queueText())
+gRow.scum:SetChecked(true)
+gRow.scum:Click()
+addRowFor("Gankmaster").add:Click()
+addRowFor("Fairfighter").add:Click()
 local _, gank = ns.List:Find(nil, "Gankmaster")
 local _, fair = ns.List:Find(nil, "Fairfighter")
 check("ticked one added as scum", gank and gank.scum == true)
 check("unticked one added as normal", fair and not fair.scum)
-check("rows lock after Add", not prows[first].scum:IsEnabled() and not prows[first].add:IsEnabled())
-H.runTimers(1) -- every row answered: the prompt closes itself
-check("prompt closes once every row is answered", not _G.PersonalVendettaPrompt:IsShown())
+check("their kill counted on Add", gank and gank.theyKilledMe == 1)
+check("added players leave the queue", ns.Pending:Count() == 0)
 
--- A second prompt must not inherit the old tick.
+-- A new arrival must not inherit the old tick.
 H.now = H.now + 600
 H.recap = {
 	{ sourceName = "Newbie", sourceGUID = "Player-4710-000NEW01",
@@ -605,9 +624,9 @@ H.recap = {
 }
 H.fire("PLAYER_DEAD")
 H.runTimers(0.2)
-check("fresh prompt resets Scum", not ns.Prompt._rows()[1].scum:GetChecked())
-check("fresh prompt re-enables Scum", ns.Prompt._rows()[1].scum:IsEnabled())
-ns.Prompt.Close()
+local nRow = addRowFor("Newbie")
+check("new row's Scum unticked", nRow and not nRow.scum:GetChecked())
+clearQueue()
 
 -- ---------------------------------------------------------------------------
 section("Scum: own horn, first in line, glowing")
@@ -768,7 +787,7 @@ check("old sound checkbox wording gone", checkboxLabelled("Play a sound when") =
 -- ---------------------------------------------------------------------------
 section("Icon and release metadata")
 local toc = assert(io.open(ADDON_DIR .. "PersonalVendetta.toc")):read("*a")
-check("toc version 1.1", toc:find("## Version: 1.1", 1, true) ~= nil)
+check("toc version 1.2", toc:find("## Version: 1.2", 1, true) ~= nil)
 check("toc icon points at our file", toc:find("Media\\icon", 1, true) ~= nil)
 local ih = io.open(ADDON_DIR .. "Media/icon.tga", "rb")
 check("icon.tga shipped", ih ~= nil)
@@ -789,24 +808,6 @@ check("scum sound defaults filled in", ns.db.settings.sound.scumChoice ~= nil an
 -- ===========================================================================
 -- v1.1
 -- ===========================================================================
-
-local function clearPrompts()
-	for _ = 1, 30 do
-		if not _G.PersonalVendettaPrompt or not _G.PersonalVendettaPrompt:IsShown() then break end
-		ns.Prompt.Close()
-		H.runTimers(1)
-	end
-	local q = ns.Prompt._queue()
-	for i = #q, 1, -1 do q[i] = nil end
-end
-
-local function promptLabels()
-	local out = {}
-	for _, row in ipairs(ns.Prompt._rows() or {}) do
-		if row:IsShown() then out[#out + 1] = row.label:GetText() or "" end
-	end
-	return table.concat(out, " | ")
-end
 
 -- ---------------------------------------------------------------------------
 section("Surnames: names")
@@ -865,7 +866,7 @@ check("secret guid, ambiguous first name: no guess", ns.Radar:Get(w1.key) == nil
 
 -- ---------------------------------------------------------------------------
 section("Surnames: death recap")
-clearPrompts()
+clearQueue()
 resetWorld()
 H.now = H.now + 600
 H.units["nameplate4"] = { name = "Morgath", surname = "Bloodfang", guid = "Player-4710-0000MRG1", level = 44,
@@ -878,17 +879,15 @@ H.recap = {
 }
 H.fire("PLAYER_DEAD")
 H.runTimers(0.2)
-local labels = promptLabels()
+local labels = queueText()
 check("killer's surname read from his nameplate", labels:find("Morgath Bloodfang", 1, true) ~= nil, labels)
 check("his level and class shown", labels:find("44 Warlock", 1, true) ~= nil, labels)
 check("joined recap name split and shown", labels:find("Kelra Dawnmere", 1, true) ~= nil, labels)
-for _, row in ipairs(ns.Prompt._rows()) do
-	if row:IsShown() and (row.label:GetText() or ""):find("Morgath", 1, true) then row.add:Click() end
-end
+addRowFor("Morgath").add:Click()
 local _, morg = ns.List:Find("Player-4710-0000MRG1")
 check("added with surname, level and race", morg and morg.surname == "Bloodfang" and morg.level == 44 and morg.race == "Undead")
 check("added killer counts their kill", morg and morg.theyKilledMe == 1)
-clearPrompts()
+clearQueue()
 
 -- ---------------------------------------------------------------------------
 section("Surnames: commands and honor messages")
@@ -908,7 +907,7 @@ check("honor message with the full name credits the right one", w1.iKilledThem =
 
 -- ---------------------------------------------------------------------------
 section("Post-fight prompt")
-clearPrompts()
+clearQueue()
 resetWorld()
 ns.db.settings.promptAfterFight = true
 H.now = H.now + 4000 -- clear of any earlier skip memory
@@ -927,90 +926,86 @@ end
 local brute = { name = "Drogbar", surname = "Skullsplit", guid = "Player-4710-0000DRG1", level = 39,
 	class = "WARRIOR", className = "Warrior", race = "Orc", isPlayer = true, canAttack = true, targets = "player" }
 fight({ nameplate6 = brute }, { before = function() brute.dead = true end })
-local cur = ns.Prompt._current()
-check("prompt after surviving", _G.PersonalVendettaPrompt:IsShown() and cur and cur.mode == "fight")
-labels = promptLabels()
-check("he is offered by full name", labels:find("Drogbar Skullsplit", 1, true) ~= nil, labels)
-check("marked as killed by you", labels:find("(you killed them)", 1, true) ~= nil, labels)
-check("fight wording, not death wording", (_G.PersonalVendettaPrompt.subtitle:GetText() or ""):find("survived", 1, true) ~= nil)
-ns.Prompt._rows()[1].add:Click()
+check("queued after surviving, no popup", ns.Pending:Count() == 1 and _G.PersonalVendettaPrompt == nil)
+labels = queueText()
+check("he is queued by full name", labels:find("Drogbar Skullsplit", 1, true) ~= nil, labels)
+check("marked as killed by you", labels:find("you killed them", 1, true) ~= nil, labels)
+check("fight wording, not death wording", labels:find("Fought you", 1, true) ~= nil
+	and labels:find("Killed you", 1, true) == nil, labels)
+addRowFor("Drogbar").add:Click()
 local _, drog = ns.List:Find("Player-4710-0000DRG1")
 check("added", drog ~= nil)
 check("his kills on you stay 0", drog and drog.theyKilledMe == 0)
 check("your kill counted", drog and drog.iKilledThem == 1)
 check("last seen set", drog and drog.lastSeen == time())
-clearPrompts()
+clearQueue()
 
 resetWorld()
 fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1", level = 30,
 	isPlayer = true, canAttack = true, targets = "player" } })
-labels = promptLabels()
+labels = queueText()
 check("one who got away is offered too", labels:find("Survivor Quickfeet", 1, true) ~= nil, labels)
 check("but not marked as killed", labels:find("you killed", 1, true) == nil, labels)
-ns.Prompt._rows()[1].skip:Click()
-H.runTimers(1)
+addRowFor("Survivor").skip:Click()
 resetWorld()
 fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1",
 	isPlayer = true, canAttack = true, targets = "player" } })
-check("skipped player not offered again soon", not _G.PersonalVendettaPrompt:IsShown())
+check("skipped player not offered again soon", ns.Pending:Count() == 0)
 H.now = H.now + 31 * 60
 resetWorld()
 fight({ nameplate6 = { name = "Survivor", surname = "Quickfeet", guid = "Player-4710-0000SRV1",
 	isPlayer = true, canAttack = true, targets = "player" } })
-check("offered again after half an hour", _G.PersonalVendettaPrompt:IsShown())
-clearPrompts()
+check("offered again after half an hour", ns.Pending:Count() == 1)
+clearQueue()
 
 resetWorld()
 fight({ nameplate6 = { name = "Duelist", surname = "Fairplay", guid = "Player-4710-0000DUE1", faction = "Alliance",
 	isPlayer = true, canAttack = true, targets = "player" } })
-check("same-faction duel opponent not offered", not _G.PersonalVendettaPrompt:IsShown())
+check("same-faction duel opponent not offered", ns.Pending:Count() == 0)
 
 resetWorld()
 fight({ nameplate6 = { name = "Bystander", surname = "Idle", guid = "Player-4710-0000BYS1",
 	isPlayer = true, canAttack = true } })
-check("enemy who never targeted you not offered", not _G.PersonalVendettaPrompt:IsShown())
+check("enemy who never targeted you not offered", ns.Pending:Count() == 0)
 
 resetWorld()
 fight({ nameplate1 = warrior({ targets = "player" }) })
-check("someone already on the list not offered", not _G.PersonalVendettaPrompt:IsShown())
+check("someone already on the list not offered", ns.Pending:Count() == 0)
 
 resetWorld()
 H.units.player.dead = true
 fight({ nameplate6 = { name = "Victor", surname = "Grim", guid = "Player-4710-0000VIC1",
 	isPlayer = true, canAttack = true, targets = "player" } })
 H.units.player.dead = nil
-check("no fight prompt when the fight killed you", not (_G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "fight"))
-clearPrompts()
+check("nothing queued from a fight that killed you", ns.Pending:Count() == 0)
+clearQueue()
 
 resetWorld()
 H.instanceType = "pvp"
 fight({ nameplate6 = { name = "Bgguy", surname = "Flag", guid = "Player-4710-0000BG01",
 	isPlayer = true, canAttack = true, targets = "player" } })
 H.instanceType = "none"
-check("no fight prompt in a battleground", not _G.PersonalVendettaPrompt:IsShown())
+check("no fight prompt in a battleground", ns.Pending:Count() == 0)
 
 resetWorld()
 ns.db.settings.promptAfterFight = false
 fight({ nameplate6 = { name = "Ignored", surname = "Setting", guid = "Player-4710-0000IGN1",
 	isPlayer = true, canAttack = true, targets = "player" } })
-check("setting off means no prompt", not _G.PersonalVendettaPrompt:IsShown())
+check("setting off means no prompt", ns.Pending:Count() == 0)
 ns.db.settings.promptAfterFight = true
 
--- A death while a fight prompt is open waits its turn.
+-- A fight and a death land side by side in the queue; nothing waits behind a popup.
 resetWorld()
 fight({ nameplate6 = { name = "First", surname = "Inline", guid = "Player-4710-0000FIR1",
 	isPlayer = true, canAttack = true, targets = "player" } })
-check("fight prompt open", _G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "fight")
 H.now = H.now + 600
 H.recap = { { sourceName = "Second", sourceGUID = "Player-4710-0000SEC1", spellName = "Ambush", spellId = 8676,
 	amount = 999, overkill = 99, event = "SPELL_DAMAGE", timestamp = H.now } }
 H.fire("PLAYER_DEAD")
 H.runTimers(0.2)
-check("death offer queued, fight prompt still showing", ns.Prompt._current().mode == "fight" and #ns.Prompt._queue() == 1)
-ns.Prompt.Close()
-H.runTimers(1)
-check("death prompt shows next", _G.PersonalVendettaPrompt:IsShown() and ns.Prompt._current().mode == "death")
-clearPrompts()
+check("fight and death both queued", ns.Pending:Count() == 2, ns.Pending:Count())
+check("both shown in the To add tab", addRowFor("First") ~= nil and addRowFor("Second") ~= nil)
+clearQueue()
 
 -- /vendetta add with no name adds your target.
 resetWorld()
@@ -1121,7 +1116,7 @@ check("unknown version refused", ns.Share:Decode("V9^whatever") == nil)
 
 -- ---------------------------------------------------------------------------
 section("Sharing: sending")
-clearPrompts()
+clearQueue()
 H.inGroup = false
 H.clearOutput()
 check("can't share outside a group", ns.Share:Send() == false and H.outputContains("party or raid"))
@@ -1220,6 +1215,221 @@ ns.InitDB()
 check("old saved name index dropped", PersonalVendettaDB.nameIndex == nil)
 check("lookups rebuilt from the list", ns.List:Find(nil, "Pumpdaddy Grimtusk") == entry.key)
 check("post-fight setting defaults on", ns.db.settings.promptAfterFight == true)
+
+-- ===========================================================================
+-- v1.2: no popups, the To add tab
+-- ===========================================================================
+
+local function die(...)
+	H.now = H.now + 600
+	local recap = {}
+	for i, k in ipairs({ ... }) do
+		recap[i] = { sourceName = k[1], sourceGUID = k[2], spellName = "Hit", spellId = 1,
+			amount = 500, overkill = (i == 1) and 50 or -1, event = "SPELL_DAMAGE", timestamp = H.now }
+	end
+	H.recap = recap
+	H.fire("PLAYER_DEAD")
+	H.runTimers(0.2)
+end
+
+-- ---------------------------------------------------------------------------
+section("Queue: nothing interrupts you")
+clearQueue()
+resetWorld()
+ns.Overlay.Toggle(true)
+ns.Overlay.SelectTab("near")
+H.clearOutput()
+die({ "Vanishblade", "Player-4710-0000VAN1" })
+check("no popup frame, ever", _G.PersonalVendettaPrompt == nil)
+check("the window did not switch tabs on its own", ns.Overlay.CurrentTab() == "near")
+check("one chat line says where to look", H.outputContains("waiting to be added") and H.outputContains("To add"))
+check("queued", ns.Pending:Count() == 1)
+
+-- ---------------------------------------------------------------------------
+section("Queue: the To add tab glows until you look")
+local tabs = ns.Overlay._tabs()
+check("tab shows the count", (tabs.add.text:GetText() or ""):find("1", 1, true) ~= nil, tabs.add.text:GetText())
+check("unseen while on Nearby", ns.Pending:UnseenCount() == 1)
+check("glow animation running", _G.PersonalVendettaOverlay:GetScript("OnUpdate") ~= nil)
+ns.Overlay.SelectTab("add")
+check("opening the tab marks it seen", ns.Pending:UnseenCount() == 0)
+check("glow stops once seen", _G.PersonalVendettaOverlay:GetScript("OnUpdate") == nil)
+ns.Overlay.SelectTab("near")
+die({ "Vanishblade", "Player-4710-0000VAN1" })
+check("a repeat from the same player glows again", ns.Pending:UnseenCount() == 1)
+check("still one row for him", ns.Pending:Count() == 1)
+
+-- ---------------------------------------------------------------------------
+section("Queue: repeats merge into one row")
+local it = ns.Pending:List()[1]
+check("killed you x2", it.deaths == 2, it.deaths)
+check("described as x2", ns.Pending:Describe(it):find("Killed you x2", 1, true) ~= nil, ns.Pending:Describe(it))
+check("killing blow noted", it.killingBlows == 2)
+SlashCmdList.PERSONALVENDETTA("recap")
+check("re-reading the recap counts nothing extra", ns.Pending:List()[1].deaths == 2)
+addRowFor("Vanishblade").add:Click()
+local _, van = ns.List:Find("Player-4710-0000VAN1")
+check("Add carries both deaths over", van and van.theyKilledMe == 2, van and van.theyKilledMe)
+check("queue empty after Add", ns.Pending:Count() == 0)
+
+-- ---------------------------------------------------------------------------
+section("Queue: note from the window, before adding")
+clearQueue()
+die({ "Notetaker", "Player-4710-0000NOT1" })
+ns.Overlay.SelectTab("add")
+local row = addRowFor("Notetaker")
+check("To add row has a Note button", row and row.note ~= nil)
+row.note:Click()
+check("editor opens for the queued player", ns.Notes:IsOpen() and ns.Notes:EditingKey() == "pending:" .. row.id)
+ns.Notes:Append("While eating/drinking")
+ns.Notes:Append("2v1")
+ns.Notes:Save()
+check("note kept on the queued player", ns.Pending:List()[1].note == "While eating/drinking, 2v1",
+	ns.Pending:List()[1].note)
+check("button shows a note exists", (addRowFor("Notetaker").note:GetLabel() or ""):find("+", 1, true) == nil)
+local ntRow = addRowFor("Notetaker")
+ntRow.scum:SetChecked(true)
+ntRow.scum:Click()
+addRowFor("Notetaker").add:Click()
+local _, nt = ns.List:Find("Player-4710-0000NOT1")
+check("note goes with them onto the list", nt and nt.note == "While eating/drinking, 2v1")
+check("scum goes with them too", nt and nt.scum == true)
+
+-- ---------------------------------------------------------------------------
+section("Nearby rows have a Note button")
+resetWorld()
+ns.Overlay.SelectTab("near")
+H.units["nameplate1"] = warrior({ surname = "Grimtusk" })
+step()
+local nearRow
+for _, r in ipairs(ns.Overlay._rows()) do if r:IsShown() and r.entry == entry then nearRow = r end end
+check("he is on the Nearby tab", nearRow ~= nil)
+check("with a Note button", nearRow and nearRow.note ~= nil)
+nearRow.note:Click()
+check("Note opens his note straight from the window", ns.Notes:IsOpen() and ns.Notes:EditingKey() == entry.key)
+_G.PersonalVendettaNotes:Hide()
+
+-- ---------------------------------------------------------------------------
+section("Queue: a sighting brings you back to Nearby")
+resetWorld()
+ns.Overlay.SelectTab("add")
+H.units["nameplate1"] = warrior({ surname = "Grimtusk" })
+H.clock = H.clock + 10
+step()
+check("switched to Nearby when a listed player appeared", ns.Overlay.CurrentTab() == "near")
+
+-- ---------------------------------------------------------------------------
+section("Queue: Add all, Skip all")
+clearQueue()
+die({ "Alpha", "Player-4710-0000ALP1" }, { "Bravo", "Player-4710-0000BRV1" }, { "Charlie", "Player-4710-0000CHR1" })
+check("three queued from one gank", ns.Pending:Count() == 3)
+ns.Overlay.SelectTab("add")
+local page = ns.Overlay._addPage()
+check("Add all button shown", page.addAll:IsShown())
+page.addAll:Click()
+check("Add all adds everyone", ns.Pending:Count() == 0 and select(2, ns.List:Find("Player-4710-0000BRV1")) ~= nil)
+die({ "Delta", "Player-4710-0000DLT1" }, { "Echo", "Player-4710-0000ECH1" })
+ns.Overlay.SelectTab("add")
+page.skipAll:Click()
+check("Skip all clears the queue", ns.Pending:Count() == 0)
+check("skipped players not added", select(2, ns.List:Find("Player-4710-0000DLT1")) == nil)
+check("empty message shown", page.empty:IsShown())
+
+-- ---------------------------------------------------------------------------
+section("Queue: saved, bounded, and kept tidy")
+clearQueue()
+die({ "Survives", "Player-4710-0000SVR1" })
+local savedId = ns.Pending:List()[1].id
+ns.InitDB()
+H.fire("ADDON_LOADED", "PersonalVendetta")
+check("queue survives a reload", ns.Pending:Count() == 1 and ns.Pending:List()[1].id == savedId)
+die({ "Afterload", "Player-4710-0000AFT1" })
+local ids = {}
+for _, q in ipairs(ns.Pending:List()) do ids[q.id] = (ids[q.id] or 0) + 1 end
+check("ids stay unique after a reload", (function() for _, n in pairs(ids) do if n > 1 then return false end end return true end)())
+SlashCmdList.PERSONALVENDETTA("add Survives")
+check("adding by command takes them out of the queue", (function()
+	for _, q in ipairs(ns.Pending:List()) do if q.name == "Survives" then return false end end
+	return true
+end)())
+clearQueue()
+for i = 1, 45 do
+	ns.Pending:OfferBatch({ { name = "Mass" .. i, guid = string.format("Player-4710-%08X", 0xA000 + i), certain = true } }, "death")
+end
+check("queue capped at 40", ns.Pending:Count() == 40, ns.Pending:Count())
+check("the newest are the ones kept", ns.Pending:List()[1].name == "Mass45")
+clearQueue()
+
+-- ---------------------------------------------------------------------------
+section("Queue: window hidden, commands, settings wording")
+ns.Overlay.Toggle(false)
+H.clearOutput()
+die({ "Hiddenview", "Player-4710-0000HID1" })
+check("with the window hidden, chat says how to open it", H.outputContains("/vendetta review"))
+SlashCmdList.PERSONALVENDETTA("review")
+check("/vendetta review opens the window on To add",
+	_G.PersonalVendettaOverlay:IsShown() and ns.Overlay.CurrentTab() == "add")
+clearQueue()
+local function labelled(needle)
+	for _, f in ipairs(H.frames) do
+		if f.label and f.label.GetText and (f.label:GetText() or ""):find(needle, 1, true) then return f end
+	end
+end
+check("setting now talks about the To add tab", labelled("Queue players who kill me") ~= nil)
+check("no setting still says Ask me", labelled("Ask me") == nil)
+
+-- ---------------------------------------------------------------------------
+section("Note window closes when its player is added")
+-- The reported steps: fight, player queued, Note, type, Add.
+clearQueue()
+resetWorld()
+fight({ nameplate6 = { name = "Noteclose", surname = "Steps", guid = "Player-4710-0000NCS1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+local ncRow = addRowFor("Noteclose")
+ncRow.note:Click()
+check("note window open", ns.Notes:IsOpen())
+ns.Notes:_edit():SetText("Typed but never pressed Save")
+addRowFor("Noteclose").add:Click()
+check("note window closes on Add", not ns.Notes:IsOpen())
+local _, ncs = ns.List:Find("Player-4710-0000NCS1")
+check("what was typed is kept", ncs and ncs.note == "Typed but never pressed Save", ncs and ncs.note)
+
+-- Same, without typing anything.
+clearQueue()
+resetWorld()
+fight({ nameplate6 = { name = "Blanknote", surname = "Steps", guid = "Player-4710-0000BNS1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+addRowFor("Blanknote").note:Click()
+addRowFor("Blanknote").add:Click()
+check("closes with an empty note too", not ns.Notes:IsOpen())
+local _, bns = ns.List:Find("Player-4710-0000BNS1")
+check("added with no note", bns and bns.note == nil)
+
+-- Skip closes it and keeps nothing.
+clearQueue()
+resetWorld()
+fight({ nameplate6 = { name = "Skipnote", surname = "Steps", guid = "Player-4710-0000SNS1",
+	isPlayer = true, canAttack = true, targets = "player" } })
+addRowFor("Skipnote").note:Click()
+ns.Notes:_edit():SetText("never mind")
+addRowFor("Skipnote").skip:Click()
+check("closes on Skip", not ns.Notes:IsOpen())
+check("skipped player not added", select(2, ns.List:Find("Player-4710-0000SNS1")) == nil)
+
+-- Adding someone else leaves an open note alone.
+clearQueue()
+die({ "Keepopen", "Player-4710-0000KOP1" }, { "Otherone", "Player-4710-0000OTH1" })
+addRowFor("Keepopen").note:Click()
+addRowFor("Otherone").add:Click()
+check("adding a different player keeps the note open", ns.Notes:IsOpen()
+	and ns.Notes:EditingKey() == "pending:" .. addRowFor("Keepopen").id)
+-- Add all closes it (and keeps the text).
+ns.Notes:_edit():SetText("via add all")
+ns.Overlay._addPage().addAll:Click()
+check("Add all closes it", not ns.Notes:IsOpen())
+local _, kop = ns.List:Find("Player-4710-0000KOP1")
+check("and keeps the text", kop and kop.note == "via add all", kop and kop.note)
+clearQueue()
 
 -- ---------------------------------------------------------------------------
 say(string.format("\n%d passed, %d failed", passed, failed))

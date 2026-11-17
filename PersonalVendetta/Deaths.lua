@@ -140,6 +140,10 @@ local function handleKillers(killers)
 	end
 
 	if #fresh > 0 and db.settings.promptOnDeath then
+		-- A gank is a gank even if some of them are already on the list.
+		if #killers > 1 then
+			for _, k in ipairs(fresh) do k.gank = true end
+		end
 		ns.Fire("OFFER_CANDIDATES", fresh, "death")
 	end
 end
@@ -210,7 +214,8 @@ ns.Deaths = {
 				k.killingBlow and " |cffffd100(killing blow)|r" or "",
 				k.spell and (" -- " .. k.spell) or ""))
 		end
-		ns.Fire("OFFER_CANDIDATES", killers, "death")
+		-- Re-reading a death already counted: queue anyone missing, count nothing.
+		ns.Fire("OFFER_CANDIDATES", killers, "recap")
 	end,
 	ForceProcess = function() return processRecap("manual") end,
 }

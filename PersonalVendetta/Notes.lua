@@ -31,7 +31,8 @@ local Notes = { presets = PRESETS }
 ns.Notes = Notes
 
 local frame, edit, counter, titleText
-local editingKey
+local editingKey      -- a hit-list key, or "pending:<id>" for a queued player
+local onSave          -- what Save does with the text
 
 -- ===========================================================================
 -- The player tooltip (hit list rows, floating window rows)
@@ -106,14 +107,7 @@ function Notes:Append(text)
 end
 
 local function save()
-	if editingKey then
-		ns.List:SetNote(editingKey, edit:GetText())
-		local entry = ns.db.list[editingKey]
-		if entry then
-			ns.Print(entry.note and ("Note saved for " .. ns.FullName(entry) .. ".")
-				or ("Note cleared for " .. ns.FullName(entry) .. "."))
-		end
-	end
+	if onSave then onSave(edit:GetText()) end
 	frame:Hide()
 end
 
@@ -232,33 +226,82 @@ local function build()
 
 	-- Height: header + box + label + preset rows + buttons.
 	frame:SetHeight(46 + EDIT_H + 12 + 40 + (lastRowBottom or 0) + 20 + 56)
-	frame:SetScript("OnHide", function() editingKey = nil ; edit:ClearFocus() end)
+	frame:SetScript("OnHide", function() editingKey, onSave = nil, nil ; edit:ClearFocus() end)
 	return frame
 end
 
--- Open the editor for one player.
-function Notes:Open(key)
-	local entry = key and ns.db.list[key]
-	if not entry then return end
-	if not frame then build() end
-
-	editingKey = key
-	local r, g, b = ns.ClassColor(entry.class)
-	local hex = string.format("%02x%02x%02x",
-		math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
-	titleText:SetText("|cff9933ffNote on|r |cff" .. hex .. ns.FullName(entry) .. "|r")
-	edit:SetText(entry.note or "")
-	updateCounter()
-
+-- Beside the window it was opened from: the settings panel, or the
+-- floating window (on whichever side has room), else mid-screen.
+local function place()
 	frame:ClearAllPoints()
 	local settings = _G.PersonalVendettaSettings
+	local overlay = _G.PersonalVendettaOverlay
 	if settings and settings:IsShown() then
 		frame:SetPoint("TOPLEFT", settings, "TOPRIGHT", 4, 0)
+	elseif overlay and overlay:IsShown() then
+		local right = overlay.GetRight and overlay:GetRight()
+		local screen = UIParent.GetWidth and UIParent:GetWidth()
+		if right and screen and (right + WIDTH + 8) > screen then
+			frame:SetPoint("TOPRIGHT", overlay, "TOPLEFT", -4, 0)
+		else
+			frame:SetPoint("TOPLEFT", overlay, "TOPRIGHT", 4, 0)
+		end
 	else
 		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
 	end
+end
+
+local function open(key, name, class, text, saveFn)
+	if not frame then build() end
+	editingKey, onSave = key, saveFn
+	local r, g, b = ns.ClassColor(class)
+	local hex = string.format("%02x%02x%02x",
+		math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+	titleText:SetText("|cff9933ffNote on|r |cff" .. hex .. name .. "|r")
+	edit:SetText(text or "")
+	updateCounter()
+	place()
 	frame:Show()
 	edit:SetFocus()
+end
+
+-- A player on the hit list.
+function Notes:Open(key)
+	local entry = key and ns.db.list[key]
+	if not entry then return end
+	open(key, ns.FullName(entry), entry.class, entry.note, function(text)
+		ns.List:SetNote(key, text)
+		local e = ns.db.list[key]
+		if e then
+			ns.Print(e.note and ("Note saved for " .. ns.FullName(e) .. ".")
+				or ("Note cleared for " .. ns.FullName(e) .. "."))
+		end
+	end)
+end
+
+-- A player still waiting in the To add tab. The note goes with them when
+-- they are added.
+function Notes:OpenPending(id)
+	local it = ns.Pending and ns.Pending:Get(id)
+	if not it then return end
+	open("pending:" .. id, ns.FullName(it.name, it.surname), it.class, it.note, function(text)
+		ns.Pending:SetNote(id, text)
+	end)
+end
+
+-- A queued player is being added: keep what was typed (even unsaved) and
+-- close the editor, so it doesn't linger for someone who has moved on.
+function Notes:CommitPending(id)
+	if frame and frame:IsShown() and editingKey == "pending:" .. tostring(id) then
+		save()
+	end
+end
+
+-- A queued player is being skipped: close the editor, keep nothing.
+function Notes:ClosePending(id)
+	if frame and frame:IsShown() and editingKey == "pending:" .. tostring(id) then
+		frame:Hide()
+	end
 end
 
 function Notes:IsOpen() return frame and frame:IsShown() or false end
