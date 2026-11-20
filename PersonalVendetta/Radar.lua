@@ -22,9 +22,11 @@ local ADDON, ns = ...
 
 local SWEEP_INTERVAL = 0.4
 local LOSE_AFTER = 2.5   -- seconds out of sight before we call them gone
+local REALERT_AFTER = 30 -- per player: gone this long before a return sounds again
+local SEEN_LOG_EVERY = 3600 -- one "seen" history line per player per hour
 local MAX_PLATES = 40
 
-local Radar = { nearby = {}, lastSweep = 0 }
+local Radar = { nearby = {}, lastSweep = 0, goneAt = {} }
 ns.Radar = Radar
 
 local ticker
@@ -176,9 +178,20 @@ local function sweep()
 		if not record then
 			record = { entry = entry, firstTick = tick, dead = dead }
 			Radar.nearby[key] = record
-			-- Walking up to a corpse is not a sighting worth a horn.
-			if not dead then
+			-- Walking up to a corpse is not a sighting worth a horn. Nor is
+			-- someone stepping back into range moments after leaving it: each
+			-- player has to be gone a while before their return sounds again.
+			local gone = Radar.goneAt[key]
+			local quickReturn = gone and (tick - gone) < REALERT_AFTER
+			if not dead and not quickReturn then
 				newSightings[#newSightings + 1] = entry
+			end
+			if not dead then
+				entry.lastZone = ns.Zone() or entry.lastZone
+				if not entry.lastSeenLog or (time() - entry.lastSeenLog) >= SEEN_LOG_EVERY then
+					entry.lastSeenLog = time()
+					ns.List:Log(entry, "seen")
+				end
 			end
 			changed = true
 		else
@@ -206,10 +219,11 @@ local function sweep()
 	consider("target")
 	consider("mouseover")
 
-	-- Expire anyone we have lost sight of.
+	-- Expire anyone we have lost sight of, remembering when they left.
 	for key, record in pairs(Radar.nearby) do
 		if (tick - (record.lastTick or 0)) > LOSE_AFTER then
 			Radar.nearby[key] = nil
+			Radar.goneAt[key] = record.lastTick or tick
 			changed = true
 		end
 	end
@@ -286,7 +300,7 @@ function Radar:SetRange(n)
 	local set = (C_CVar and C_CVar.SetCVar) or _G.SetCVar
 	ns.try(set, "nameplateMaxDistance", tostring(n))
 	local now = self:GetRange()
-	ns.Print("Nameplate distance asked for " .. n .. ", client reports " .. now .. ".")
+	ns.Print(string.format(ns.L["Nameplate distance asked for %s, the game reports %s."], tostring(n), tostring(now)))
 	return now
 end
 
@@ -318,8 +332,8 @@ end
 -- Which of the two are off, for a precise message.
 function Radar:NameplatesMissing()
 	local missing = {}
-	if not cvarOn("nameplateShowEnemies") then missing[#missing + 1] = "enemy nameplates" end
-	if not cvarOn("nameplateShowAll") then missing[#missing + 1] = "\"always show nameplates\"" end
+	if not cvarOn("nameplateShowEnemies") then missing[#missing + 1] = ns.L["enemy nameplates"] end
+	if not cvarOn("nameplateShowAll") then missing[#missing + 1] = ns.L["\"always show nameplates\""] end
 	return missing
 end
 
@@ -330,12 +344,12 @@ end
 
 function Radar:EnableNameplates(quiet)
 	if self:NameplatesOn() then
-		if not quiet then ns.Print("Enemy nameplates are already on. The radar can see.") end
+		if not quiet then ns.Print(ns.L["Enemy nameplates are already on. The radar can see."]) end
 		return true
 	end
 	if inCombat() then
 		pendingEnable = true
-		ns.Print("In combat -- enemy nameplates will switch on the moment the fight ends.")
+		ns.Print(ns.L["In combat -- enemy nameplates will switch on the moment the fight ends."])
 		return false
 	end
 	local set = (C_CVar and C_CVar.SetCVar) or _G.SetCVar
@@ -344,20 +358,36 @@ function Radar:EnableNameplates(quiet)
 	end
 	pendingEnable = false
 	if self:NameplatesOn() then
-		ns.Print("|cff44ff44Enemy nameplates on.|r The radar can see. (V toggles them in game.)")
+		ns.Print("|cff44ff44" .. ns.L["Enemy nameplates on."] .. "|r " .. ns.L["The radar can see. (V toggles them in game.)"])
 		ns.Fire("SETTINGS_CHANGED")
 		C_Timer.After(0.05, sweep)
 		return true
 	end
-	ns.Print("|cffff4444The game would not switch them on.|r Open Options > Nameplates and tick "
-		.. "\"Show Enemy Nameplates\" and \"Always Show Nameplates\".")
+	ns.Print("|cffff4444" .. ns.L["The game would not switch them on."] .. "|r "
+		.. ns.L["Open Options > Nameplates and tick \"Show Enemy Nameplates\" and \"Always Show Nameplates\"."])
 	return false
+end
+
+-- Switch enemy nameplates off (the radar goes blind). The client refuses
+-- nameplate changes in combat, so that is said rather than failing quietly.
+function Radar:DisableNameplates()
+	if not self:NameplatesOn() and not cvarOn("nameplateShowEnemies") then return true end
+	if inCombat() then
+		ns.Print(ns.L["Nameplates can't be changed in combat. Try again once the fight ends."])
+		return false
+	end
+	pendingEnable = false
+	local set = (C_CVar and C_CVar.SetCVar) or _G.SetCVar
+	ns.try(set, "nameplateShowEnemies", "0")
+	ns.Print(ns.L["Enemy nameplates off. The radar is blind until you switch them back on."])
+	ns.Fire("SETTINGS_CHANGED")
+	return true
 end
 
 -- Route to Blizzard's own Nameplates settings page. Restricted in combat.
 function Radar:OpenNameplateSettings()
 	if inCombat() then
-		ns.Print("Settings can't be opened in combat. Try again once the fight ends.")
+		ns.Print(ns.L["Settings can't be opened in combat. Try again once the fight ends."])
 		return false
 	end
 	local id = Settings and Settings.NAMEPLATE_OPTIONS_CATEGORY_ID
@@ -365,14 +395,15 @@ function Radar:OpenNameplateSettings()
 		local ok = pcall(Settings.OpenToCategory, id)
 		if ok then return true end
 	end
-	ns.Print("Couldn't open it directly: Esc > Options > Nameplates.")
+	ns.Print(ns.L["Couldn't open it directly: Esc > Options > Nameplates."])
 	return false
 end
 
 function Radar:CheckSetup()
 	if self:NameplatesOn() then return end
-	ns.Print("|cffff4444The radar is blind:|r " .. table.concat(self:NameplatesMissing(), " and ")
-		.. " off. Fix it with |cffffd100/vendetta nameplates|r or in the settings (minimap skull).")
+	ns.Print("|cffff4444" .. ns.L["The radar is blind:"] .. "|r "
+		.. string.format(ns.L["%s off. Fix it with /vendetta nameplates or in the settings (minimap skull)."],
+			table.concat(self:NameplatesMissing(), ns.L[" and "])))
 end
 
 -- ===========================================================================

@@ -12,7 +12,7 @@
 
 local ADDON, ns = ...
 
-ns.VERSION = "1.2"
+ns.VERSION = "2.0"
 ns.PREFIX = "|cff9933ffVendetta|r "
 
 -- Art. The icon ships in Media\; WoW finds icon.tga without the extension.
@@ -94,10 +94,23 @@ local DEFAULTS = {
 			volume = 0.6,       -- 0..1, applied through PlaySound's volumeOverride
 			scumChoice = "airhorn",
 			scumVolume = 0.6,   -- scum gets its own sound and its own level
+			quietCapitals = false, -- no horn or chat alert inside the capital cities
+			quietTowns = false,    -- nor in neutral towns (Gadgetzan...) and inns
 		},
 		minimap = {
 			angle = 215,    -- degrees around the minimap rim; always shown
 		},
+		window = {
+			locked = false,
+			scale = 1,
+			opacity = 0.55,   -- background only; text stays readable
+			autoHide = false, -- hide entirely when nobody is near and nothing waits
+		},
+		markNameplates = true,   -- skull above listed players' nameplates
+		celebrate = true,        -- toast and fanfare when you settle a score
+		partyAlertSend = true,   -- tell your group when you spot someone
+		partyAlertReceive = true,
+		listSort = "newest",
 	},
 	lastRecapSig = nil,
 	pending = {},     -- the To add queue
@@ -133,8 +146,96 @@ function ns.InitDB()
 	db.nameIndex = nil
 
 	ns.db = db
+
+	-- The account-wide store. Whether it is in use is an account setting:
+	-- every character sees the same answer.
+	PersonalVendettaAccountDB = PersonalVendettaAccountDB or {}
+	local acct = PersonalVendettaAccountDB
+	acct.list = acct.list or {}
+	ns.account = acct
+	if acct.enabled and not db.mergedIntoAccount then
+		ns.MergeIntoAccount()
+	end
+
 	ns.List:Reindex()
 	return ns.db
+end
+
+-- The list in use right now: this character's own, or the shared one.
+function ns.ListData()
+	if ns.account and ns.account.enabled then return ns.account.list end
+	return ns.db.list
+end
+
+function ns.IsAccountWide()
+	return ns.account and ns.account.enabled and true or false
+end
+
+local function copyTable(t)
+	if type(t) ~= "table" then return t end
+	local c = {}
+	for k, v in pairs(t) do c[k] = copyTable(v) end
+	return c
+end
+ns.CopyTable = copyTable
+
+-- Fold this character's list into the shared one. Someone on both becomes
+-- one entry: deaths on different characters are different deaths, so the
+-- counts add up; everything else keeps the richest information.
+function ns.MergeIntoAccount()
+	local acct, db = ns.account, ns.db
+	local wasEnabled = acct.enabled
+	acct.enabled = true
+	ns.List:Reindex()
+	local merged, added = 0, 0
+	for key, mine in pairs(db.list) do
+		local k2, theirs = ns.List:Find(mine.guid, mine.name, mine.surname)
+		if theirs then
+			theirs.theyKilledMe = (theirs.theyKilledMe or 0) + (mine.theyKilledMe or 0)
+			theirs.iKilledThem = (theirs.iKilledThem or 0) + (mine.iKilledThem or 0)
+			theirs.scum = theirs.scum or mine.scum
+			if mine.note and (not theirs.note or #mine.note > #theirs.note) then theirs.note = mine.note end
+			theirs.firstAdded = math.min(theirs.firstAdded or mine.firstAdded or time(), mine.firstAdded or time())
+			theirs.lastSeen = math.max(theirs.lastSeen or 0, mine.lastSeen or 0)
+			if theirs.lastSeen == 0 then theirs.lastSeen = nil end
+			for _, f in ipairs({ "guid", "surname", "level", "class", "className", "race", "lastZone" }) do
+				if theirs[f] == nil then theirs[f] = mine[f] end
+			end
+			theirs.history = theirs.history or {}
+			for _, h in ipairs(mine.history or {}) do theirs.history[#theirs.history + 1] = copyTable(h) end
+			table.sort(theirs.history, function(a, b) return (a.t or 0) < (b.t or 0) end)
+			merged = merged + 1
+		else
+			acct.list[key] = copyTable(mine)
+			added = added + 1
+		end
+		ns.List:Reindex()
+	end
+	db.mergedIntoAccount = true
+	acct.enabled = wasEnabled
+	return added, merged
+end
+
+-- Turn the shared list on or off for every character.
+function ns.SetAccountWide(on)
+	on = on and true or false
+	if on == ns.IsAccountWide() then return end
+	if on then
+		ns.account.enabled = true
+		if not ns.db.mergedIntoAccount then
+			local added, merged = ns.MergeIntoAccount()
+			ns.Print(string.format(ns.L["Shared list on. This character's list was merged in: %d added, %d combined."],
+				added, merged))
+		else
+			ns.Print(ns.L["Shared list on."])
+		end
+	else
+		ns.account.enabled = false
+		ns.Print(ns.L["Shared list off. This character is back to its own list."])
+	end
+	ns.List:Reindex()
+	ns.Fire("LIST_CHANGED")
+	ns.Fire("SETTINGS_CHANGED")
 end
 
 -- ===========================================================================
@@ -221,7 +322,7 @@ end
 
 function List:Reindex()
 	byFull, byFirst = {}, {}
-	for key, entry in pairs(ns.db.list) do
+	for key, entry in pairs(ns.ListData()) do
 		entry.key = key
 		indexEntry(key, entry)
 	end
@@ -247,7 +348,7 @@ ns.keyFor = keyFor
 -- An entry that already has a GUID is never matched to a different GUID by
 -- name: two players called Willia are two players.
 function List:Find(guid, name, surname)
-	local db = ns.db
+	local db = { list = ns.ListData() }
 	local g = ns.str(guid)
 	if g and db.list[g] then return g, db.list[g] end
 
@@ -281,14 +382,55 @@ end
 
 function List:Count()
 	local n = 0
-	for _ in pairs(ns.db.list) do n = n + 1 end
+	for _ in pairs(ns.ListData()) do n = n + 1 end
 	return n
 end
+
+-- ===========================================================================
+-- History: what happened, when, where
+-- ===========================================================================
+
+local HISTORY_MAX = 40
+local LEVELS_MAX = 20
+
+-- Where you are right now: "Darkshire, Duskwood", or just "Duskwood".
+function ns.Zone()
+	local okZ, zone = ns.try(GetRealZoneText)
+	local okS, sub = ns.try(GetSubZoneText)
+	zone = okZ and ns.str(zone) or nil
+	sub = okS and ns.str(sub) or nil
+	if sub and zone and sub ~= zone then return sub .. ", " .. zone end
+	return zone or sub
+end
+
+-- event: "died" (they killed you), "killed" (you killed them), "fought",
+-- "seen", "added", "shared".
+function List:Log(entry, event, extra)
+	if not entry then return end
+	entry.history = entry.history or {}
+	local h = { t = time(), e = event, z = ns.Zone(), lv = entry.level }
+	if extra then for k, v in pairs(extra) do h[k] = v end end
+	entry.history[#entry.history + 1] = h
+	while #entry.history > HISTORY_MAX do table.remove(entry.history, 1) end
+	if h.z then entry.lastZone = h.z end
+	return h
+end
+
+-- Remember each level we see them at, once per change.
+local function noteLevel(entry, level)
+	if not level then return end
+	entry.levels = entry.levels or {}
+	local last = entry.levels[#entry.levels]
+	if last and last.lv == level then return end
+	entry.levels[#entry.levels + 1] = { t = time(), lv = level }
+	while #entry.levels > LEVELS_MAX do table.remove(entry.levels, 1) end
+end
+ns.NoteLevel = noteLevel
 
 -- Create or update an entry. info may carry guid, name, surname (or a
 -- joined "First Last" name), level, levelSkull, class, className, race.
 function List:Upsert(info)
-	local db = ns.db
+	local db = { list = ns.ListData() }
 	local guid = ns.str(info.guid)
 	local first, last = ns.SplitName(info.name, info.surname)
 	if not guid and not first then return nil, nil end
@@ -336,6 +478,7 @@ function List:Upsert(info)
 		entry.level = level
 		entry.levelSkull = nil
 		entry.levelAt = time()
+		noteLevel(entry, level)
 	end
 	entry.class = ns.str(info.class) or entry.class
 	entry.className = ns.str(info.className) or entry.className
@@ -345,17 +488,42 @@ function List:Upsert(info)
 	return key, entry
 end
 
+-- Returns true plus a snapshot that Restore can put back (for Undo).
 function List:Remove(guid, name)
 	local key, entry, count = self:Find(guid, name)
 	if not key then return false, count end
+	local snapshot = { key = key, entry = copyTable(entry) }
 	unindexEntry(key, entry)
-	ns.db.list[key] = nil
+	ns.ListData()[key] = nil
 	ns.Fire("LIST_CHANGED")
-	return true
+	return true, snapshot
+end
+
+function List:RemoveKey(key)
+	local entry = key and ns.ListData()[key]
+	if not entry then return nil end
+	local snapshot = { key = key, entry = copyTable(entry) }
+	unindexEntry(key, entry)
+	ns.ListData()[key] = nil
+	ns.Fire("LIST_CHANGED")
+	return snapshot
+end
+
+function List:Restore(snapshot)
+	if not snapshot or not snapshot.key then return nil end
+	local data = ns.ListData()
+	if data[snapshot.key] then return data[snapshot.key] end
+	local entry = copyTable(snapshot.entry)
+	entry.key = snapshot.key
+	data[snapshot.key] = entry
+	indexEntry(snapshot.key, entry)
+	ns.Fire("LIST_CHANGED")
+	return entry
 end
 
 function List:Wipe()
-	ns.db.list = {}
+	local data = ns.ListData()
+	for k in pairs(data) do data[k] = nil end
 	byFull, byFirst = {}, {}
 	ns.Fire("LIST_CHANGED")
 end
@@ -366,6 +534,8 @@ function List:RecordTheirKill(info)
 	entry.theyKilledMe = (entry.theyKilledMe or 0) + 1
 	entry.lastKilledMe = time()
 	entry.lastSeen = time() -- they were standing over you
+	entry.streak = 0
+	List:Log(entry, "died")
 	ns.Fire("LIST_CHANGED")
 	return entry
 end
@@ -378,6 +548,9 @@ function List:AddFromFight(info)
 	if info.killedByMe then
 		entry.iKilledThem = (entry.iKilledThem or 0) + 1
 		entry.lastIKilledThem = time()
+		List:Log(entry, "killed")
+	else
+		List:Log(entry, "added")
 	end
 	entry.lastSeen = time()
 	ns.Fire("LIST_CHANGED")
@@ -400,15 +573,27 @@ function List:RecordMyKill(info, force)
 		return entry, false
 	end
 
-	entry.iKilledThem = (entry.iKilledThem or 0) + 1
+	local before = entry.iKilledThem or 0
+	entry.iKilledThem = before + 1
 	entry.lastIKilledThem = now
+	entry.streak = (entry.streak or 0) + 1
+	List:Log(entry, "killed")
 	ns.Fire("LIST_CHANGED")
+
+	-- The payoff: drawing level, or pulling ahead, after being behind.
+	local theirs = entry.theyKilledMe or 0
+	if not force and theirs > 0 and before < theirs and entry.iKilledThem >= theirs then
+		entry.settledAt = now
+		ns.Fire("SCORE_SETTLED", entry, entry.iKilledThem > theirs)
+	elseif not force and (entry.streak == 3 or entry.streak == 5 or entry.streak == 10) then
+		ns.Fire("STREAK", entry, entry.streak)
+	end
 	return entry, true
 end
 
 -- Scum: killed you dishonourably. A must-kill on sight.
 function List:SetScum(key, isScum)
-	local entry = key and ns.db.list[key]
+	local entry = key and ns.ListData()[key]
 	if not entry then return nil end
 	entry.scum = isScum and true or nil
 	ns.Fire("LIST_CHANGED")
@@ -433,7 +618,7 @@ function ns.CleanText(s, max)
 end
 
 function List:SetNote(key, text)
-	local entry = key and ns.db.list[key]
+	local entry = key and ns.ListData()[key]
 	if not entry then return nil end
 	entry.note = ns.CleanText(text, ns.NOTE_MAX)
 	ns.Fire("LIST_CHANGED")
@@ -451,7 +636,7 @@ end
 -- Entries sorted worst-offender first.
 function List:Sorted()
 	local t = {}
-	for key, entry in pairs(ns.db.list) do
+	for key, entry in pairs(ns.ListData()) do
 		entry.key = key
 		t[#t + 1] = entry
 	end
@@ -466,7 +651,7 @@ end
 -- Entries newest first: the order you added them in, latest on top.
 function List:ByDateAdded()
 	local t = {}
-	for key, entry in pairs(ns.db.list) do
+	for key, entry in pairs(ns.ListData()) do
 		entry.key = key
 		t[#t + 1] = entry
 	end
@@ -480,19 +665,19 @@ end
 
 -- "just now", "12 min ago", "3 hours ago", "2 days ago", or "never".
 function ns.Ago(t)
-	if not t then return "never" end
+	local L = ns.L
+	if not t then return L["never"] end
 	local d = time() - t
-	if d < 60 then return "just now" end
+	if d < 60 then return L["just now"] end
 	if d < 3600 then
-		local m = math.floor(d / 60)
-		return m .. " min ago"
+		return string.format(L["%d min ago"], math.floor(d / 60))
 	end
 	if d < 86400 then
 		local h = math.floor(d / 3600)
-		return h == 1 and "1 hour ago" or (h .. " hours ago")
+		return h == 1 and L["1 hour ago"] or string.format(L["%d hours ago"], h)
 	end
 	local days = math.floor(d / 86400)
-	return days == 1 and "1 day ago" or (days .. " days ago")
+	return days == 1 and L["1 day ago"] or string.format(L["%d days ago"], days)
 end
 
 -- ===========================================================================
@@ -531,6 +716,65 @@ function ns.InTrackedZone()
 	return true
 end
 
+-- Cities and towns, where enemies stroll past all day and a horn every
+-- minute is just noise. Places are matched by area ID through the client's
+-- own (localized) area names, with the English name as a fallback.
+local CAPITALS = {
+	[1519] = "Stormwind City", [1537] = "Ironforge", [1657] = "Darnassus",
+	[1637] = "Orgrimmar", [1638] = "Thunder Bluff", [1497] = "Undercity",
+}
+local TOWNS = {
+	[35] = "Booty Bay", [976] = "Gadgetzan", [392] = "Ratchet", [2255] = "Everlook",
+	[2268] = "Light's Hope Chapel", [3425] = "Cenarion Hold", [1446] = "Thorium Point",
+}
+local placeNames -- lower-case name -> "capital" | "town"
+local function buildPlaceNames()
+	placeNames = {}
+	local getArea = C_Map and C_Map.GetAreaInfo
+	local function add(ids, kind)
+		for id, english in pairs(ids) do
+			placeNames[string.lower(english)] = kind
+			if getArea then
+				local ok, name = ns.try(getArea, id)
+				name = ok and ns.str(name)
+				if name and name ~= "" then placeNames[string.lower(name)] = kind end
+			end
+		end
+	end
+	add(TOWNS, "town")
+	add(CAPITALS, "capital") -- capitals win any clash
+end
+
+local function zoneText(fn)
+	local ok, v = ns.try(fn)
+	v = ok and ns.str(v)
+	return v and v ~= "" and string.lower(v) or nil
+end
+
+-- "capital", "town" or nil for wherever you are standing.
+function ns.PlaceKind()
+	if not placeNames then buildPlaceNames() end
+	local zone = GetRealZoneText and zoneText(GetRealZoneText)
+	if zone and placeNames[zone] == "capital" then return "capital" end
+	local sub = GetSubZoneText and zoneText(GetSubZoneText)
+	if sub and placeNames[sub] then return placeNames[sub] end
+	if zone and placeNames[zone] then return placeNames[zone] end
+	-- Any other rest area (an inn, a town) counts as a town.
+	local okR, resting = ns.try(IsResting)
+	if okR and resting == true then return "town" end
+	return nil
+end
+
+-- True when the player asked for quiet here.
+function ns.InQuietPlace()
+	local s = ns.db and ns.db.settings.sound
+	if not s or not (s.quietCapitals or s.quietTowns) then return false end
+	local kind = ns.PlaceKind()
+	if kind == "capital" then return s.quietCapitals and true or false end
+	if kind == "town" then return s.quietTowns and true or false end
+	return false
+end
+
 -- A checkbox from Blizzard's template, or drawn by hand if it is missing.
 -- The template's own label is blanked; callers place their own text.
 function ns.CreateCheckButton(parent)
@@ -551,9 +795,9 @@ end
 function ns.ScumTooltip(owner)
 	if not GameTooltip then return end
 	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-	GameTooltip:AddLine(ns.SCUM_COLOR .. "Scum|r")
-	GameTooltip:AddLine("Killed you dishonourably: ganked you while you were\nlow level, questing, or fighting a mob.", 1, 1, 1, true)
-	GameTooltip:AddLine("Scum get their own horn and glow red on the radar.", 0.8, 0.8, 0.8, true)
+	GameTooltip:AddLine(ns.SCUM_COLOR .. ns.L["Scum"] .. "|r")
+	GameTooltip:AddLine(ns.L["Killed you dishonourably: ganked you while you were low level, questing, or fighting a mob."], 1, 1, 1, true)
+	GameTooltip:AddLine(ns.L["Scum get their own horn and glow red on the radar."], 0.8, 0.8, 0.8, true)
 	GameTooltip:Show()
 end
 
@@ -573,11 +817,10 @@ loader:SetScript("OnEvent", function(_, _, name)
 	if name ~= ADDON then return end
 	ns.InitDB()
 	ns.Fire("DB_READY")
-	ns.Print("v" .. ns.VERSION .. " loaded. " .. ns.List:Count()
-		.. " on the list. Click the skull on your minimap for settings.")
+	ns.Print(string.format(ns.L["v%s loaded. %d on the list. Click the skull on your minimap for settings."],
+		ns.VERSION, ns.List:Count()))
 	if not ns.db.introShown then
 		ns.db.introShown = true
-		ns.Print("This does not warn you about every enemy around you -- only players "
-			.. "who have killed you and that you chose to add to your list.")
+		ns.Print(ns.L["This does not warn you about every enemy around you -- only players who have killed you and that you chose to add to your list."])
 	end
 end)

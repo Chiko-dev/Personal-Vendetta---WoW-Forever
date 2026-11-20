@@ -17,6 +17,7 @@
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
+local L = ns.L
 
 local PREFIX = "PVendetta"
 local CHUNK = 230             -- payload bytes per message; the cap is 255
@@ -150,8 +151,8 @@ local function channel()
 end
 
 function Share:CanShare()
-	if sending then return false, "Already sharing -- give it a moment." end
-	if not channel() then return false, "You need to be in a party or raid." end
+	if sending then return false, L["Already sharing -- give it a moment."] end
+	if not channel() then return false, L["You need to be in a party or raid."] end
 	return true
 end
 
@@ -182,8 +183,8 @@ pump = function()
 	if not s then return end
 	local msg = s.queue[s.i]
 	if not msg then
-		finishSending(string.format("|cff44ff44Hit list shared|r with your %s (%d players).",
-			s.channel == "RAID" and "raid" or "party", s.total))
+		finishSending("|cff44ff44" .. string.format(s.channel == "RAID" and L["Hit list shared with your raid (%d players)."]
+			or L["Hit list shared with your party (%d players)."], s.total) .. "|r")
 		return
 	end
 
@@ -195,16 +196,16 @@ pump = function()
 	elseif res == RESULT.THROTTLE or res == RESULT.CHANNEL_THROTTLE then
 		s.retries = s.retries + 1
 		if s.retries > MAX_RETRIES then
-			finishSending("|cffff4444Sharing stopped:|r the game kept throttling messages. Try again in a minute.")
+			finishSending("|cffff4444" .. L["Sharing stopped:"] .. "|r " .. L["the game kept throttling messages. Try again in a minute."])
 		else
 			C_Timer.After(THROTTLE_RETRY, pump)
 		end
 	elseif res == RESULT.NOT_IN_GROUP then
-		finishSending("|cffff4444Sharing stopped:|r you're no longer in a group.")
+		finishSending("|cffff4444" .. L["Sharing stopped:"] .. "|r " .. L["you're no longer in a group."])
 	elseif res == RESULT.LOCKDOWN then
-		finishSending("|cffff4444Sharing stopped:|r addon messages are blocked here right now. Try again out of combat.")
+		finishSending("|cffff4444" .. L["Sharing stopped:"] .. "|r " .. L["addon messages are blocked here right now. Try again out of combat."])
 	else
-		finishSending("|cffff4444Sharing stopped:|r the game refused the message (code " .. tostring(res) .. ").")
+		finishSending("|cffff4444" .. L["Sharing stopped:"] .. "|r " .. string.format(L["the game refused the message (code %s)."], tostring(res)))
 	end
 end
 
@@ -216,7 +217,7 @@ function Share:Send()
 	end
 	local entries = ns.List:ByDateAdded()
 	if #entries == 0 then
-		ns.Print("Your list is empty -- nothing to share.")
+		ns.Print(L["Your list is empty -- nothing to share."])
 		return false
 	end
 
@@ -226,7 +227,7 @@ function Share:Send()
 		chunks[#chunks + 1] = string.sub(payload, i, i + CHUNK - 1)
 	end
 	if #chunks > MAX_CHUNKS then
-		ns.Print("Your list is too long to share in one go.")
+		ns.Print(L["Your list is too long to share in one go."])
 		return false
 	end
 
@@ -243,9 +244,9 @@ function Share:Send()
 
 	sending = { sid = sid, channel = channel(), queue = queue, i = 1, retries = 0, total = #entries }
 	local seconds = math.max(1, math.floor(math.max(0, #queue - BURST) * STEADY_GAP + 0.5))
-	ns.Print(string.format("Sharing %d players with your %s%s...", #entries,
-		sending.channel == "RAID" and "raid" or "party",
-		#queue > BURST and (" (about " .. seconds .. " s)") or ""))
+	ns.Print(string.format(sending.channel == "RAID" and L["Sharing %d players with your raid..."]
+		or L["Sharing %d players with your party..."], #entries)
+		.. (#queue > BURST and (" " .. string.format(L["(about %d s)"], seconds)) or ""))
 	ns.Fire("GROUP_CHANGED")
 	pump()
 	return true
@@ -305,7 +306,7 @@ local function showImport(session, records)
 	local from = session.from
 
 	if #new == 0 then
-		ns.Print(string.format("%s shared their hit list: all %d already on yours.", from, #records))
+		ns.Print(string.format(L["%s shared their hit list: all %d already on yours."], from, #records))
 		return
 	end
 
@@ -330,7 +331,7 @@ local function showImport(session, records)
 		end
 		importFrame.title = importFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		importFrame.title:SetPoint("TOP", 0, -16)
-		importFrame.title:SetText("|cff9933ffShared hit list|r")
+		importFrame.title:SetText("|cff9933ff" .. L["Shared hit list"] .. "|r")
 		importFrame.body = importFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 		importFrame.body:SetPoint("TOPLEFT", 20, -44)
 		importFrame.body:SetPoint("TOPRIGHT", -20, -44)
@@ -347,26 +348,25 @@ local function showImport(session, records)
 		importFrame.no = CreateFrame("Button", nil, importFrame, "UIPanelButtonTemplate")
 		importFrame.no:SetSize(110, 22)
 		importFrame.no:SetPoint("BOTTOMRIGHT", -20, 18)
-		importFrame.no:SetText("No thanks")
+		importFrame.no:SetText(L["No thanks"])
 		importFrame.no:SetScript("OnClick", function() importFrame:Hide() end)
 	end
 
-	importFrame.body:SetText(string.format(
-		"|cffffffff%s|r shared their hit list: %d player%s, |cff44ff44%d new to you|r%s.",
-		from, #records, #records == 1 and "" or "s", #new,
-		known > 0 and (", " .. known .. " already on your list") or ""))
+	importFrame.body:SetText(string.format(L["%s shared their hit list. Players: %d, new to you: %d."],
+		"|cffffffff" .. from .. "|r", #records, #new)
+		.. (known > 0 and (" " .. string.format(L["Already on your list: %d."], known)) or ""))
 
 	local preview = {}
 	for i = 1, math.min(#new, 8) do
 		local r = new[i]
 		preview[#preview + 1] = (r.scum and (ns.SKULL .. " ") or "") .. ns.FullName(r.name, r.surname)
 	end
-	importFrame.names:SetText(table.concat(preview, ", ") .. (#new > 8 and (" and " .. (#new - 8) .. " more") or ""))
+	importFrame.names:SetText(table.concat(preview, ", ") .. (#new > 8 and (" " .. string.format(L["and %d more"], #new - 8)) or ""))
 
-	importFrame.yes:SetText("Import " .. #new .. " new")
+	importFrame.yes:SetText(string.format(L["Import %d new"], #new))
 	importFrame.yes:SetScript("OnClick", function()
 		local added = Share:Import(new, from)
-		ns.Print(string.format("Imported %d player%s from %s's hit list.", added, added == 1 and "" or "s", from))
+		ns.Print(string.format(L["Imported from %s's hit list: %d."], from, added))
 		importFrame:Hide()
 	end)
 	importFrame.pending = new
@@ -376,7 +376,7 @@ end
 local function onMessage(prefix, text, _, sender)
 	if prefix ~= PREFIX then return end
 	text = ns.str(text)
-	sender = ns.str(sender) or "Someone"
+	sender = ns.str(sender) or L["Someone"]
 	if not text then return end
 
 	local now = time()
@@ -385,6 +385,10 @@ local function onMessage(prefix, text, _, sender)
 	end
 
 	local kind = string.sub(text, 1, 2)
+	if kind == "S:" then
+		Share:OnPartySighting(text, sender)
+		return
+	end
 	if kind == "O:" then
 		local sid, n, count, guid, name = string.match(text, "^O:(%x+):(%d+):(%d+):([^:]*):(.*)$")
 		n, count = tonumber(n), tonumber(count)
@@ -396,7 +400,7 @@ local function onMessage(prefix, text, _, sender)
 			from = display, sid = sid, n = n, count = count or 0,
 			chunks = {}, got = 0, started = now,
 		}
-		ns.Print(string.format("%s is sharing their hit list (%d players)...", display, count or 0))
+		ns.Print(string.format(L["%s is sharing their hit list (%d players)..."], display, count or 0))
 	elseif kind == "C:" then
 		local sid, i, data = string.match(text, "^C:(%x+):(%d+):(.*)$")
 		local s = sid and sessions[sender .. ":" .. sid]
@@ -410,11 +414,74 @@ local function onMessage(prefix, text, _, sender)
 			if records and #records > 0 then
 				showImport(s, records)
 			else
-				ns.Print(s.from .. " shared a hit list this version can't read.")
+				ns.Print(string.format(L["%s shared a hit list this version can't read."], s.from))
 			end
 		end
 	end
 end
+
+-- ===========================================================================
+-- Party alerts
+-- When you spot someone from your list, other Vendetta users in your group
+-- hear about it:  S:<guid>:<first>:<surname>:<level>:<scum>:<zone>:<fromGUID>:<fromName>
+-- Only sightings that actually sounded for you are sent, so the per-player
+-- 30-second rule keeps your group from being spammed too.
+-- ===========================================================================
+
+local PARTY_COOLDOWN = 30
+local partyHeard = {} -- spotted guid/name -> GetTime() last announced to you
+
+function Share:SendSighting(entry)
+	if not ns.db.settings.partyAlertSend then return false end
+	if ns.InQuietPlace() then return false end -- quiet here means quiet for the group too
+	local ch = channel()
+	if not ch or not ns.InTrackedZone() then return false end
+	local _, myGUID = ns.try(UnitGUID, "player")
+	local first, last = ns.Radar and ns.Radar.UnitNames("player")
+	local msg = table.concat({
+		"S", enc(entry.guid), enc(entry.name), enc(entry.surname), enc(entry.level),
+		entry.scum and "1" or "", enc(string.sub(ns.Zone() or "", 1, 40)),
+		enc(ns.str(myGUID) or ""), enc(string.sub(ns.FullName(first, last), 1, 40)),
+	}, ":")
+	if #msg > 255 then return false end
+	return sendRaw(msg, ch) == RESULT.SUCCESS
+end
+
+function Share:OnPartySighting(text, sender)
+	if not ns.db.settings.partyAlertReceive then return end
+	if ns.InQuietPlace() then return end
+	local f = split(text, ":")
+	if #f < 9 then return end
+	local _, myGUID = ns.try(UnitGUID, "player")
+	local fromGUID = dec(f[8])
+	if fromGUID ~= "" and fromGUID == ns.str(myGUID) then return end -- our own
+
+	local rec = checkRecord({ f[2], f[3], f[4], f[5], "", "", "", "", f[6], "", "0" })
+	if not rec then return end
+	local zone = ns.CleanText(dec(f[7]), 40)
+	local from = ns.CleanText(dec(f[9]), 50) or ns.CleanText(sender, 50) or L["Someone"]
+
+	local id = rec.guid or string.lower(ns.FullName(rec.name, rec.surname))
+	local now = GetTime()
+	if partyHeard[id] and (now - partyHeard[id]) < PARTY_COOLDOWN then return end
+	partyHeard[id] = now
+
+	local _, mine = ns.List:Find(rec.guid, rec.name, rec.surname)
+	local name = ns.FullName(mine or rec)
+	local where = zone and string.format(L[" in %s"], zone) or ""
+	if mine then
+		local tag = mine.scum and (ns.SKULL .. ns.SCUM_COLOR .. L["SCUM"] .. "|r ") or ""
+		ns.Print(string.format(L["%s spotted %s%s from your list%s."], from, tag, "|cffff4444" .. name .. "|r", where))
+		if ns.Sound then ns.Sound:Play(mine.scum and "scum" or "normal") end
+	else
+		ns.Print(string.format(L["%s spotted %s from their hit list%s."], from, name, where))
+	end
+	ns.Fire("PARTY_SIGHTING", rec, from, mine)
+end
+
+ns.On("SIGHTED", function(entries)
+	for i = 1, math.min(#entries, 3) do Share:SendSighting(entries[i]) end
+end)
 
 -- ===========================================================================
 -- Events

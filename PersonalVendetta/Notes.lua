@@ -8,6 +8,7 @@
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
+local L = ns.L
 
 local WIDTH = 440
 local EDIT_W, EDIT_H = WIDTH - 52, 84
@@ -46,23 +47,23 @@ function ns.EntryTooltip(owner, entry, anchor)
 	GameTooltip:AddLine((entry.scum and (ns.SKULL .. " ") or "") .. ns.FullName(entry), r, g, b)
 
 	local bits = {}
-	if entry.levelSkull then bits[#bits + 1] = "Level ??"
-	elseif entry.level then bits[#bits + 1] = "Level " .. entry.level end
+	if entry.levelSkull then bits[#bits + 1] = L["Level ??"]
+	elseif entry.level then bits[#bits + 1] = string.format(L["Level %d"], entry.level) end
 	if entry.race then bits[#bits + 1] = entry.race end
 	if entry.className then bits[#bits + 1] = entry.className end
 	if #bits > 0 then GameTooltip:AddLine(table.concat(bits, " "), 0.8, 0.8, 0.8) end
 
-	GameTooltip:AddLine(string.format("|cffff6666Killed you %d|r   |cff66ff66You killed them %d|r",
-		entry.theyKilledMe or 0, entry.iKilledThem or 0))
-	GameTooltip:AddLine("Added " .. ns.Ago(entry.firstAdded) .. ", last seen " .. ns.Ago(entry.lastSeen),
+	GameTooltip:AddLine("|cffff6666" .. string.format(L["Killed you %d"], entry.theyKilledMe or 0) .. "|r   |cff66ff66"
+		.. string.format(L["You killed them %d"], entry.iKilledThem or 0) .. "|r")
+	GameTooltip:AddLine(string.format(L["Added %s, last seen %s"], ns.Ago(entry.firstAdded), ns.Ago(entry.lastSeen)),
 		0.6, 0.6, 0.6)
 	if entry.sharedBy then
 		local killed = (entry.sharedKills or 0) > 0
-			and string.format(" (killed them %d time%s)", entry.sharedKills, entry.sharedKills == 1 and "" or "s") or ""
-		GameTooltip:AddLine("Shared by " .. entry.sharedBy .. killed, 0.6, 0.6, 0.9)
+			and (" " .. string.format(L["(killed them: %d)"], entry.sharedKills)) or ""
+		GameTooltip:AddLine(string.format(L["Shared by %s"], entry.sharedBy) .. killed, 0.6, 0.6, 0.9)
 	end
 	if entry.scum then
-		GameTooltip:AddLine(ns.SCUM_COLOR .. "Scum: must kill on sight.|r")
+		GameTooltip:AddLine(ns.SCUM_COLOR .. L["Scum: must kill on sight."] .. "|r")
 	end
 	if entry.note then
 		GameTooltip:AddLine(" ")
@@ -94,6 +95,7 @@ end
 function Notes:Append(text)
 	if not edit then return false end
 	local cur = trim(edit:GetText())
+	text = L[text]
 	if string.find(string.lower(cur), string.lower(text), 1, true) then return false end
 	local new = (cur == "") and text or (cur .. ", " .. text)
 	if #new > ns.NOTE_MAX then
@@ -186,7 +188,7 @@ local function build()
 
 	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	hint:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -18)
-	hint:SetText("Quick add")
+	hint:SetText(L["Quick add"])
 
 	-- Preset buttons, flowed into rows that fit the width.
 	local x, y = 0, 0
@@ -194,7 +196,7 @@ local function build()
 	local lastRowBottom
 	frame.presetButtons = {}
 	for _, text in ipairs(PRESETS) do
-		local b = button(frame, text, 10, 20)
+		local b = button(frame, L[text], 10, 20)
 		local fs = b.GetFontString and b:GetFontString()
 		local w = (fs and fs.GetStringWidth and fs:GetStringWidth() or (#text * 6)) + 22
 		b:SetWidth(w)
@@ -209,9 +211,9 @@ local function build()
 		lastRowBottom = y
 	end
 
-	local saveB = button(frame, "Save", 90)
-	local clearB = button(frame, "Clear", 90)
-	local cancelB = button(frame, "Cancel", 90)
+	local saveB = button(frame, L["Save"], 90)
+	local clearB = button(frame, L["Clear"], 90)
+	local cancelB = button(frame, L["Cancel"], 90)
 	cancelB:SetPoint("BOTTOMRIGHT", -20, 18)
 	saveB:SetPoint("RIGHT", cancelB, "LEFT", -6, 0)
 	clearB:SetPoint("BOTTOMLEFT", 20, 18)
@@ -236,7 +238,10 @@ local function place()
 	frame:ClearAllPoints()
 	local settings = _G.PersonalVendettaSettings
 	local overlay = _G.PersonalVendettaOverlay
-	if settings and settings:IsShown() then
+	local detail = _G.PersonalVendettaDetail
+	if detail and detail:IsShown() then
+		frame:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, -4)
+	elseif settings and settings:IsShown() then
 		frame:SetPoint("TOPLEFT", settings, "TOPRIGHT", 4, 0)
 	elseif overlay and overlay:IsShown() then
 		local right = overlay.GetRight and overlay:GetRight()
@@ -257,7 +262,7 @@ local function open(key, name, class, text, saveFn)
 	local r, g, b = ns.ClassColor(class)
 	local hex = string.format("%02x%02x%02x",
 		math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
-	titleText:SetText("|cff9933ffNote on|r |cff" .. hex .. name .. "|r")
+	titleText:SetText("|cff9933ff" .. string.format(L["Note on %s"], "|cff" .. hex .. name .. "|r") .. "|r")
 	edit:SetText(text or "")
 	updateCounter()
 	place()
@@ -273,8 +278,7 @@ function Notes:Open(key)
 		ns.List:SetNote(key, text)
 		local e = ns.db.list[key]
 		if e then
-			ns.Print(e.note and ("Note saved for " .. ns.FullName(e) .. ".")
-				or ("Note cleared for " .. ns.FullName(e) .. "."))
+			ns.Print(string.format(e.note and L["Note saved for %s."] or L["Note cleared for %s."], ns.FullName(e)))
 		end
 	end)
 end

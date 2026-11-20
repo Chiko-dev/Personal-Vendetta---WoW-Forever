@@ -73,8 +73,8 @@ local function credit(entry, how)
 	if not entry then return end
 	local _, counted = ns.List:RecordMyKill({ guid = entry.guid, name = entry.name, surname = entry.surname })
 	if counted then
-		ns.Print(string.format("|cff66ff66Kill on %s counted|r (%s). Now %d to %d.",
-			ns.FullName(entry), how, entry.theyKilledMe or 0, entry.iKilledThem or 0))
+		ns.Print(string.format(ns.L["Kill on %s counted (%s). Now %d to %d."],
+			"|cff66ff66" .. ns.FullName(entry) .. "|r", ns.L[how], entry.theyKilledMe or 0, entry.iKilledThem or 0))
 	end
 	engaged[entry.key] = nil
 end

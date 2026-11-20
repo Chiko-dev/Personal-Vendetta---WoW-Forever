@@ -46,16 +46,16 @@ local function showTooltip(self)
 	GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 	GameTooltip:AddLine("|cff9933ffPersonal Vendetta|r")
 	local near = ns.Radar and ns.Radar:Count() or 0
-	GameTooltip:AddLine(string.format("%d on the list%s", ns.List:Count(),
-		near > 0 and (", |cffff4444" .. near .. " near|r") or ""), 1, 1, 1)
+	GameTooltip:AddLine(string.format(ns.L["%d on list"], ns.List:Count())
+		.. (near > 0 and (", |cffff4444" .. string.format(ns.L["%d near"], near) .. "|r") or ""), 1, 1, 1)
 	local waiting = ns.Pending and ns.Pending:Count() or 0
 	if waiting > 0 then
-		GameTooltip:AddLine(string.format("|cffffd100%d waiting to be added|r (To add tab)", waiting))
+		GameTooltip:AddLine("|cffffd100" .. string.format(ns.L["%d waiting to be added (To add tab)"], waiting) .. "|r")
 	end
 	GameTooltip:AddLine(" ")
-	GameTooltip:AddLine("|cffffd100Left-click|r  settings", 0.8, 0.8, 0.8)
-	GameTooltip:AddLine("|cffffd100Right-click|r  show/hide window", 0.8, 0.8, 0.8)
-	GameTooltip:AddLine("|cffffd100Drag|r  move this button", 0.8, 0.8, 0.8)
+	GameTooltip:AddLine("|cffffd100" .. ns.L["Left-click"] .. "|r  " .. ns.L["settings"], 0.8, 0.8, 0.8)
+	GameTooltip:AddLine("|cffffd100" .. ns.L["Right-click"] .. "|r  " .. ns.L["show/hide window"], 0.8, 0.8, 0.8)
+	GameTooltip:AddLine("|cffffd100" .. ns.L["Drag"] .. "|r  " .. ns.L["move this button"], 0.8, 0.8, 0.8)
 	GameTooltip:Show()
 end
 

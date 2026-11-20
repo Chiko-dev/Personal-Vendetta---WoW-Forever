@@ -17,7 +17,16 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 - **A radar for your list.** The floating window's **Nearby** tab collapses to a title bar when nobody is around and expands, flashes, and sounds a horn when someone from your list comes into range. It shows their level, race, class, the score between you, and a Note button.
 - **Honest levels.** White means read off them just now. Red `??` means they're 10+ levels above you. Grey `47?` is the last level the game showed.
 - **Keeps score both ways.** Their kills on you come from the death recap. Your kills on them count whenever you took part (they were your target, or they were on you or your group, or the honor system credited you), whoever landed the killing blow.
-- **Settings from the minimap skull.** Left-click opens settings, right-click shows or hides the window, drag to move it. Alert sounds (Warhorn, Boat Horn, Brass, Air Horn and more) have separate choices and volumes for normal and scum sightings. The hit list tab shows everyone newest first, with when you last saw them.
+- **A skull over their head.** Listed players get a skull above their nameplate; scum get a pulsing red one.
+- **No horn spam.** Each player sounds once when they come into range. If they step out and back in, they have to be gone 30 seconds before they sound again, and that timer is per player. You can also keep it quiet in capital cities, and in neutral towns like Gadgetzan and inns: the window still shows who's there, without the horn or chat line.
+- **Party alerts.** When you spot someone from your list, groupmates running the addon get a chat line (and a horn, if that player is on their list too).
+- **Settle the score.** Draw level with someone who was ahead and you get a "Vendetta settled" banner and fanfare. Kill streaks of 3, 5 and 10 get one too.
+- **Player detail.** Click a name in the hit list for everything known about them: score and standing, when you first met, where you last saw them, the levels they've been seen at, and a dated history of kills and deaths.
+- **Undo.** Skip, Skip all and Remove show an Undo button for 10 seconds.
+- **One list for all your characters** (optional). Turning it on merges this character's list in, adding scores together for anyone on both.
+- **Radar dot.** The dot in the window's corner is green when the radar can see and red when enemy nameplates are off; click it to switch them on or off.
+- **Settings from the minimap skull.** Left-click opens settings, right-click shows or hides the window, drag to move it. Tabs for General, Window (lock, size, background opacity, auto-hide when quiet), Alerts (separate horns and volumes for normal and scum sightings) and Hit list (search by name, class, race, zone or note, and a sort dropdown: newest, deaths, kills, scum, last seen or name).
+- **In your language.** English, German, French, Spanish (incl. Mexican) and Russian.
 - **Ignores arenas and battlegrounds.** Duels never count, since a duel doesn't kill you.
 
 ## Installation
@@ -41,6 +50,7 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 | `/vendetta add` | Add your current target |
 | `/vendetta add <first> <surname>` / `remove <name>` | Add or take someone off by hand |
 | `/vendetta note <name>` | Write a note on someone |
+| `/vendetta detail <name>` | Everything known about someone |
 | `/vendetta share` | Share your list with your party or raid |
 | `/vendetta scum <name>` / `unscum <name>` | Mark or clear scum |
 | `/vendetta kill <name>` / `unkill <name>` | Fix your kill count by hand |
@@ -49,6 +59,7 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 | `/vendetta nameplates` | Switch on the enemy nameplates the radar needs |
 | `/vendetta range [n]` | Show or raise the nameplate radar range |
 | `/vendetta sound` | Toggle the sighting sounds |
+| `/vendetta feedback` | Link to leave feedback or report a bug |
 | `/vendetta debug` | Show which parts loaded |
 | `/vendetta wipe confirm` | Clear the whole list |
 
@@ -72,6 +83,10 @@ Known limits:
 ## Compatibility
 
 Built for **WoW: Forever** (interface `16001`). It will not load on Classic Era or retail, which use different interface versions and APIs.
+
+## Feedback
+
+Ideas and bug reports are welcome in the [CurseForge comments](https://www.curseforge.com/wow/addons/personal-vendetta-pvp/comments). Translation fixes from native speakers especially.
 
 ## Development
 

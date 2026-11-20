@@ -1,11 +1,22 @@
 ## Interface: 16001
 ## Title: Personal |cff9933ffVendetta|r
 ## Notes: A hitman list for the people who have killed you in the open world. Not a warning for every enemy: only the ones who killed you.
-## Version: 1.2
+## Notes-deDE: Eine Abschussliste für die Spieler, die dich in der offenen Welt getötet haben. Keine Warnung vor jedem Gegner: nur vor denen, die dich getötet haben.
+## Notes-frFR: Une liste noire des joueurs qui t'ont tué en monde ouvert. Pas une alerte pour chaque ennemi : seulement ceux qui t'ont tué.
+## Notes-esES: Una lista negra de los jugadores que te han matado en el mundo abierto. No avisa de cada enemigo: solo de los que te mataron.
+## Notes-esMX: Una lista negra de los jugadores que te han matado en el mundo abierto. No avisa de cada enemigo: solo de los que te mataron.
+## Notes-ruRU: Список игроков, убивших вас в открытом мире. Не предупреждает о каждом враге: только о тех, кто вас убил.
+## Version: 2.0
+## SavedVariables: PersonalVendettaAccountDB
 ## SavedVariablesPerCharacter: PersonalVendettaDB
 ## IconTexture: Interface\AddOns\PersonalVendetta\Media\icon
 ## AddonCompartmentFunc: PersonalVendetta_OnAddonCompartmentClick
 
+Locale.lua
+Locales\deDE.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\ruRU.lua
 Core.lua
 Sound.lua
 Deaths.lua
@@ -15,6 +26,9 @@ Fights.lua
 Notes.lua
 Share.lua
 Pending.lua
+Toast.lua
+Detail.lua
+Marks.lua
 Overlay.lua
 Settings.lua
 Minimap.lua

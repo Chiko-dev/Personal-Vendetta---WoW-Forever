@@ -11,6 +11,7 @@
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
+local L = ns.L
 
 local MAX_ITEMS = 40   -- oldest are dropped beyond this
 
@@ -121,6 +122,15 @@ function Pending:Offer(c, mode)
 		if c.killedByMe then it.kills = it.kills + 1 end
 	end
 
+	-- Their own little history, handed to the list entry on Add.
+	local event = (mode == "death" or (mode == "recap" and isNew)) and "died"
+		or (mode == "fight" and (c.killedByMe and "killed" or "fought")) or nil
+	if event then
+		it.events = it.events or {}
+		it.events[#it.events + 1] = { t = time(), e = event, z = ns.Zone(), lv = c.level }
+		while #it.events > 20 do table.remove(it.events, 1) end
+	end
+
 	it.last = time()
 	it.seen = false
 	return it, isNew
@@ -189,13 +199,21 @@ function Pending:Add(id, quiet)
 	entry.lastSeen = math.max(entry.lastSeen or 0, it.last or 0)
 	if it.scum then entry.scum = true end
 	if it.note then entry.note = ns.CleanText(it.note, ns.NOTE_MAX) end
+	if (it.kills or 0) > 0 and (it.deaths or 0) == 0 then entry.streak = it.kills end
+	if (it.deaths or 0) > 0 then entry.streak = 0 end
+	if it.events then
+		entry.history = entry.history or {}
+		for _, h in ipairs(it.events) do entry.history[#entry.history + 1] = ns.CopyTable(h) end
+		table.sort(entry.history, function(a, b) return (a.t or 0) < (b.t or 0) end)
+		if it.events[#it.events].z then entry.lastZone = it.events[#it.events].z end
+	end
 
 	if not quiet then
 		local name = ns.FullName(entry)
 		if entry.scum then
-			ns.Print(string.format("%s%s|r added to the list as %sscum|r.", ns.SCUM_COLOR, name, ns.SCUM_COLOR))
+			ns.Print(string.format(L["%s added to the list as scum."], ns.SCUM_COLOR .. name .. "|r"))
 		else
-			ns.Print(string.format("|cffff4444%s|r added to the list.", name))
+			ns.Print(string.format(L["%s added to the list."], "|cffff4444" .. name .. "|r"))
 		end
 	end
 	ns.Fire("LIST_CHANGED")
@@ -203,13 +221,35 @@ function Pending:Add(id, quiet)
 	return entry
 end
 
+-- Put skipped players back, for Undo.
+function Pending:Restore(snapshots)
+	for _, snap in ipairs(snapshots or {}) do
+		if not self:Get(snap.id) then
+			local _, onList = ns.List:Find(snap.guid, snap.name, snap.surname)
+			if not onList then
+				items()[#items() + 1] = ns.CopyTable(snap)
+				if ns.Fights and ns.Fights.Forget then ns.Fights:Forget(snap.key) end
+			end
+		end
+	end
+	ns.Fire("PENDING_CHANGED")
+end
+
 -- Let them go. Someone you only fought is not offered again for a while.
-function Pending:Skip(id)
+-- quiet: no Undo toast (Skip all shows one for the lot).
+function Pending:Skip(id, quiet)
 	if ns.Notes and ns.Notes.ClosePending then ns.Notes:ClosePending(id) end
 	local it = remove(id)
 	if not it then return end
 	if (it.fights or 0) > 0 and ns.Fights then ns.Fights:Remember({ key = it.key }) end
 	ns.Fire("PENDING_CHANGED")
+	if not quiet and ns.Toast then
+		local snap = ns.CopyTable(it)
+		ns.Toast:Undo(string.format(ns.L["Skipped %s."], ns.FullName(it.name, it.surname)), function()
+			Pending:Restore({ snap })
+		end)
+	end
+	return it
 end
 
 function Pending:AddAll()
@@ -217,12 +257,21 @@ function Pending:AddAll()
 	for _, it in ipairs(self:List()) do
 		if self:Add(it.id, true) then n = n + 1 end
 	end
-	if n > 0 then ns.Print(string.format("Added %d player%s to the list.", n, n == 1 and "" or "s")) end
+	if n > 0 then ns.Print(string.format(L["Players added to the list: %d"], n)) end
 	return n
 end
 
 function Pending:SkipAll()
-	for _, it in ipairs(self:List()) do self:Skip(it.id) end
+	local snaps = {}
+	for _, it in ipairs(self:List()) do
+		local gone = self:Skip(it.id, true)
+		if gone then snaps[#snaps + 1] = ns.CopyTable(gone) end
+	end
+	if #snaps > 0 and ns.Toast then
+		ns.Toast:Undo(string.format(ns.L["Skipped %d players."], #snaps), function()
+			Pending:Restore(snaps)
+		end)
+	end
 end
 
 function Pending:SetScum(id, on)
@@ -243,18 +292,18 @@ end
 function Pending:Describe(it)
 	local bits = {}
 	if (it.deaths or 0) > 0 then
-		local s = "|cffff6666Killed you" .. (it.deaths > 1 and (" x" .. it.deaths) or "") .. "|r"
-		if (it.killingBlows or 0) > 0 then s = s .. " |cffffd100(killing blow)|r" end
+		local s = "|cffff6666" .. L["Killed you"] .. (it.deaths > 1 and (" x" .. it.deaths) or "") .. "|r"
+		if (it.killingBlows or 0) > 0 then s = s .. " |cffffd100(" .. L["killing blow"] .. ")|r" end
 		bits[#bits + 1] = s
-		if it.gank then bits[#bits + 1] = "gank" end
+		if it.gank then bits[#bits + 1] = L["gank"] end
 	end
 	if (it.fights or 0) > 0 and (it.deaths or 0) == 0 then
-		bits[#bits + 1] = "Fought you" .. (it.fights > 1 and (" x" .. it.fights) or "")
+		bits[#bits + 1] = L["Fought you"] .. (it.fights > 1 and (" x" .. it.fights) or "")
 	end
 	if (it.kills or 0) > 0 then
-		bits[#bits + 1] = "|cff66ff66you killed them" .. (it.kills > 1 and (" x" .. it.kills) or "") .. "|r"
+		bits[#bits + 1] = "|cff66ff66" .. L["you killed them"] .. (it.kills > 1 and (" x" .. it.kills) or "") .. "|r"
 	end
-	if it.uncertain then bits[#bits + 1] = "|cff888888unconfirmed|r" end
+	if it.uncertain then bits[#bits + 1] = "|cff888888" .. L["unconfirmed"] .. "|r" end
 	return table.concat(bits, " |cff666666-|r ")
 end
 
@@ -264,19 +313,19 @@ function ns.PendingTooltip(owner, it, anchor)
 	local r, g, b = ns.ClassColor(it.class)
 	GameTooltip:AddLine((it.scum and (ns.SKULL .. " ") or "") .. ns.FullName(it.name, it.surname), r, g, b)
 	local bits = {}
-	if it.levelSkull then bits[#bits + 1] = "Level ??"
-	elseif it.level then bits[#bits + 1] = "Level " .. it.level end
+	if it.levelSkull then bits[#bits + 1] = L["Level ??"]
+	elseif it.level then bits[#bits + 1] = string.format(L["Level %d"], it.level) end
 	if it.race then bits[#bits + 1] = it.race end
 	if it.className then bits[#bits + 1] = it.className end
 	if #bits > 0 then GameTooltip:AddLine(table.concat(bits, " "), 0.8, 0.8, 0.8) end
 	GameTooltip:AddLine(Pending:Describe(it), 1, 1, 1, true)
-	GameTooltip:AddLine("Waiting since " .. ns.Ago(it.at), 0.6, 0.6, 0.6)
+	GameTooltip:AddLine(string.format(L["Waiting since %s"], ns.Ago(it.at)), 0.6, 0.6, 0.6)
 	if it.note then
 		GameTooltip:AddLine(" ")
 		GameTooltip:AddLine(it.note, 1, 0.82, 0.3, true)
 	end
 	GameTooltip:AddLine(" ")
-	GameTooltip:AddLine("Not on your list yet. Add or Skip them here.", 0.6, 0.6, 0.6, true)
+	GameTooltip:AddLine(L["Not on your list yet. Add or Skip them here."], 0.6, 0.6, 0.6, true)
 	GameTooltip:Show()
 end
 
@@ -292,11 +341,11 @@ ns.On("OFFER_CANDIDATES", function(candidates, mode)
 
 	local names = {}
 	for i = 1, math.min(#added, 3) do names[i] = ns.FullName(added[i].name, added[i].surname) end
-	local more = #added > 3 and (" and " .. (#added - 3) .. " more") or ""
+	local more = #added > 3 and (" " .. string.format(L["and %d more"], #added - 3)) or ""
 	local where = (ns.db.settings.overlayShown ~= false)
-		and "Review them in the |cffffd100To add|r tab of the Vendetta window."
-		or "Type |cffffd100/vendetta review|r to open them."
-	ns.Print(table.concat(names, ", ") .. more .. " waiting to be added. " .. where)
+		and L["Review them in the To add tab of the Vendetta window."]
+		or L["Type /vendetta review to open them."]
+	ns.Print(string.format(L["%s waiting to be added."], table.concat(names, ", ") .. more) .. " " .. where)
 end)
 
 -- Someone added another way (a command, sharing) leaves the queue.

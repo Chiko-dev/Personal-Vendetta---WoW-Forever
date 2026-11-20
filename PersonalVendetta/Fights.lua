@@ -127,10 +127,15 @@ local function offer()
 	end
 end
 
--- The prompt calls this for each fight candidate you skip or close on.
+-- Called for each fight candidate you skip.
 function Fights:Remember(candidate)
 	local k = candidate and (candidate.key or foeKey(candidate))
 	if k then skipped[k] = time() end
+end
+
+-- Undo of a skip: they can be offered again.
+function Fights:Forget(key)
+	if key then skipped[key] = nil end
 end
 
 -- ===========================================================================

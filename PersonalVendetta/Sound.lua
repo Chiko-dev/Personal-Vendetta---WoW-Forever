@@ -98,6 +98,15 @@ local function playKit(kit, volume)
 	return false
 end
 
+-- A one-off sound (the fanfare for settling a score) at the normal alert
+-- volume, falling back to Ready Check if the kit is missing.
+function Sound:PlayKit(kit)
+	if not ns.db then return false end
+	local volume = self:Volume("normal")
+	if volume <= 0 then return false end
+	return playKit(kit, volume) or playKit(SOUNDKIT and SOUNDKIT.READY_CHECK, volume)
+end
+
 -- Play an alert. kind is "normal" or "scum". force ignores the on/off
 -- switch and the throttle, for the Test buttons.
 function Sound:Play(kind, force)
@@ -105,6 +114,7 @@ function Sound:Play(kind, force)
 	local cfg = ns.db.settings.sound
 	if not force then
 		if not cfg.enabled then return false end
+		if ns.InQuietPlace and ns.InQuietPlace() then return false end
 		-- Scum is never drowned out by a normal horn a second ago.
 		if (GetTime() - lastPlayed[kind]) < THROTTLE then return false end
 	end

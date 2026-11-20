@@ -10,8 +10,8 @@ local FILES = {}
 do
 	local f = assert(io.open(ADDON_DIR .. "PersonalVendetta.toc", "r"))
 	for line in f:lines() do
-		local file = string.match(line, "^%s*([%w_]+%.lua)%s*$")
-		if file then FILES[#FILES + 1] = file end
+		local file = string.match(line, "^%s*([%w_\\]+%.lua)%s*$")
+		if file then FILES[#FILES + 1] = (string.gsub(file, "\\", "/")) end
 	end
 	f:close()
 end
@@ -643,7 +643,7 @@ step()
 check("scum horn played, not the normal one", H.lastSound and H.lastSound.soundKitID == 316436,
 	H.lastSound and H.lastSound.soundKitID)
 check("at the scum volume", H.lastSound and H.lastSound.volumeOverride == 0.8, H.lastSound and H.lastSound.volumeOverride)
-check("chat calls him scum", H.outputContains("SCUM Gankmaster"))
+check("chat calls him scum", H.outputContains("SCUM|r ") and H.outputContains("Gankmaster|r is near. Must kill."))
 local near = ns.Radar:GetNearby()
 check("scum sorted to the top", near[1] and near[1].entry.name == "Gankmaster", near[1] and near[1].entry.name)
 local orow = _G.PersonalVendettaOverlay and nil
@@ -787,7 +787,7 @@ check("old sound checkbox wording gone", checkboxLabelled("Play a sound when") =
 -- ---------------------------------------------------------------------------
 section("Icon and release metadata")
 local toc = assert(io.open(ADDON_DIR .. "PersonalVendetta.toc")):read("*a")
-check("toc version 1.2", toc:find("## Version: 1.2", 1, true) ~= nil)
+check("toc version 2.0", toc:find("## Version: 2.0", 1, true) ~= nil)
 check("toc icon points at our file", toc:find("Media\\icon", 1, true) ~= nil)
 local ih = io.open(ADDON_DIR .. "Media/icon.tga", "rb")
 check("icon.tga shipped", ih ~= nil)
@@ -1182,8 +1182,8 @@ for _, i in ipairs(order) do ns.Share._onMessage(ns.Share.PREFIX, asFriend(msgs[
 check("announced who is sharing", H.outputContains("Kaz Ironvein is sharing their hit list"))
 local imp = _G.PersonalVendettaImport
 check("import prompt shown", imp and imp:IsShown())
-check("says how many are new", imp and (imp.body:GetText() or ""):find("3 new to you", 1, true) ~= nil, imp and imp.body:GetText())
-check("says how many you already have", imp and (imp.body:GetText() or ""):find((listSize - 3) .. " already on your list", 1, true) ~= nil)
+check("says how many are new", imp and (imp.body:GetText() or ""):find("new to you: 3", 1, true) ~= nil, imp and imp.body:GetText())
+check("says how many you already have", imp and (imp.body:GetText() or ""):find("Already on your list: " .. (listSize - 3), 1, true) ~= nil)
 imp.yes:Click()
 check("only the new ones imported", ns.List:Count() == before + 3, ns.List:Count() .. " vs " .. (before + 3))
 local _, back = ns.List:Find("Player-4710-0000DRG1")
@@ -1430,6 +1430,363 @@ check("Add all closes it", not ns.Notes:IsOpen())
 local _, kop = ns.List:Find("Player-4710-0000KOP1")
 check("and keeps the text", kop and kop.note == "via add all", kop and kop.note)
 clearQueue()
+
+
+-- ===========================================================================
+-- v2.0
+-- ===========================================================================
+
+local function enemy(name, surname, guid, extra)
+	local t = { name = name, surname = surname, guid = guid, level = 30, class = "ROGUE",
+		className = "Rogue", race = "Undead", isPlayer = true, canAttack = true }
+	for k, v in pairs(extra or {}) do t[k] = v end
+	return t
+end
+local function seen(text) for _, l in ipairs(H.output) do if string.find(l, text, 1, true) then return true end end return false end
+
+-- ---------------------------------------------------------------------------
+section("Per-player 30 second re-alert")
+resetWorld()
+ns.db.settings.sound.enabled = true
+local rv = ns.List:RecordTheirKill({ guid = "Player-4710-00RV0001", name = "Revolver", surname = "Door" })
+local sightings = 0
+ns.On("SIGHTED", function(list) for _, e in ipairs(list) do if e == rv then sightings = sightings + 1 end end end)
+H.units.nameplate3 = enemy("Revolver", "Door", "Player-4710-00RV0001")
+step()
+check("first sighting sounds", sightings == 1, sightings)
+H.units.nameplate3 = nil
+step(3) ; step(0.4)
+check("gone from the radar", ns.Radar:Get(rv.key) == nil)
+H.units.nameplate3 = enemy("Revolver", "Door", "Player-4710-00RV0001")
+step(5)
+check("back after a few seconds: silent", sightings == 1, sightings)
+H.units.nameplate3 = nil
+step(3) ; step(0.4)
+step(31)
+H.units.nameplate3 = enemy("Revolver", "Door", "Player-4710-00RV0001")
+step()
+check("back after 30+ seconds: sounds again", sightings == 2, sightings)
+-- Someone else is not held back by Revolver's timer.
+local ot = ns.List:RecordTheirKill({ guid = "Player-4710-00RV0002", name = "Otherguy", surname = "Door" })
+local otherSighted = false
+ns.On("SIGHTED", function(list) for _, e in ipairs(list) do if e == ot then otherSighted = true end end end)
+H.units.nameplate4 = enemy("Otherguy", "Door", "Player-4710-00RV0002")
+step()
+check("the delay is per player", otherSighted)
+check("zone remembered on sighting", rv.lastZone == "Goldshire, Elwynn Forest", rv.lastZone)
+check("sighting logged in history", (function()
+	for _, h in ipairs(rv.history or {}) do if h.e == "seen" or h.event == "seen" then return true end end
+	return false end)())
+
+-- ---------------------------------------------------------------------------
+section("Skull on their nameplate")
+ns.db.settings.markNameplates = true
+step()
+check("listed player in view is marked", ns.Marks:Get(rv.key) ~= nil)
+check("marker sits on their plate", ns.Marks:Get(rv.key) and ns.Marks:Get(rv.key).plate == H.plates.nameplate3)
+ns.List:SetScum(rv.key, true)
+step()
+check("scum marker glows", ns.Marks:Get(rv.key) and ns.Marks:Get(rv.key).scum == true)
+ns.List:SetScum(rv.key, false)
+H.plates.nameplate4.__forbidden = true
+ns.Marks:Clear()
+step()
+check("forbidden plate is left alone", ns.Marks:Get(ot.key) == nil)
+H.plates.nameplate4.__forbidden = false
+H.units.nameplate3 = nil
+step(3) ; step(0.4)
+check("mark released when they leave", ns.Marks:Get(rv.key) == nil)
+ns.db.settings.markNameplates = false
+ns.Fire("SETTINGS_CHANGED")
+check("setting off clears every mark", ns.Marks:Count() == 0)
+ns.db.settings.markNameplates = true
+resetWorld()
+
+-- ---------------------------------------------------------------------------
+section("Settle the score")
+local st = ns.List:RecordTheirKill({ guid = "Player-4710-00ST0001", name = "Settler", surname = "Score" })
+ns.List:RecordTheirKill({ guid = "Player-4710-00ST0001", name = "Settler", surname = "Score" })
+local settled, streak
+ns.On("SCORE_SETTLED", function(e, ahead) settled = { e, ahead } end)
+ns.On("STREAK", function(e, n) streak = n end)
+ns.List:RecordMyKill({ guid = "Player-4710-00ST0001" })
+check("1 of 2: not settled yet", settled == nil)
+H.now = H.now + 60
+ns.List:RecordMyKill({ guid = "Player-4710-00ST0001" })
+check("drawing level settles it", settled and settled[1] == st and settled[2] == false)
+check("revenge toast shown", ns.Toast:IsShown() and seen ~= nil)
+check("toast says settled", (_G.PersonalVendettaToast.title:GetText() or ""):find("settled", 1, true) ~= nil,
+	_G.PersonalVendettaToast.title:GetText())
+H.now = H.now + 60
+ns.List:RecordMyKill({ guid = "Player-4710-00ST0001" })
+check("third kill in a row is a streak", streak == 3, streak)
+check("their kill resets the streak", ns.List:RecordTheirKill({ guid = "Player-4710-00ST0001" }).streak == 0)
+
+-- ---------------------------------------------------------------------------
+section("Player detail")
+ns.List:Upsert({ guid = "Player-4710-00ST0001", name = "Settler", surname = "Score", level = 31 })
+ns.List:Upsert({ guid = "Player-4710-00ST0001", name = "Settler", surname = "Score", level = 34 })
+ns.Detail:Open(st.key)
+check("detail opens", ns.Detail:IsOpen() and ns.Detail:Key() == st.key)
+check("levels recorded", st.levels and #st.levels >= 2, st.levels and #st.levels)
+check("progression line mentions levels", (function()
+	local p = ns.Detail:Progression(st)
+	local s = type(p) == "table" and table.concat(p, "\n") or tostring(p)
+	return s:find("34", 1, true) ~= nil end)())
+check("history has kills and deaths", (function()
+	local lines = ns.Detail:HistoryLines(st)
+	return type(lines) == "table" and #lines >= 4 end)())
+local dframe = ns.Detail:_frame()
+dframe.remove:Click()
+check("remove takes them off", select(2, ns.List:Find("Player-4710-00ST0001")) == nil)
+check("undo offered", ns.Toast:IsShown() and _G.PersonalVendettaToast.button:IsShown())
+_G.PersonalVendettaToast.button:Click()
+local _, back = ns.List:Find("Player-4710-00ST0001")
+check("undo brings them back with their score", back and back.theyKilledMe == 3 and back.iKilledThem == 3,
+	back and (back.theyKilledMe .. "/" .. back.iKilledThem))
+check("detail not open for an unknown key", (function() ns.Detail:_frame():Hide(); ns.Detail:Open("nope") ; return not ns.Detail:IsOpen() end)())
+
+-- ---------------------------------------------------------------------------
+section("Undo for skips")
+clearQueue()
+die({ "Undoskip", "Player-4710-00US0001" })
+addRowFor("Undoskip").skip:Click()
+check("skipped", addRowFor("Undoskip") == nil)
+check("undo toast for the skip", ns.Toast:IsShown() and (_G.PersonalVendettaToast.title:GetText() or ""):find("Undoskip", 1, true))
+_G.PersonalVendettaToast.button:Click()
+check("undo puts them back in the queue", addRowFor("Undoskip") ~= nil)
+die({ "Skipa", "Player-4710-00US0002" }, { "Skipb", "Player-4710-00US0003" })
+ns.Overlay._addPage().skipAll:Click()
+check("skip all empties the queue", ns.Pending:Count() == 0, ns.Pending:Count())
+_G.PersonalVendettaToast.button:Click()
+check("one undo brings everyone back", ns.Pending:Count() >= 3, ns.Pending:Count())
+clearQueue()
+
+-- ---------------------------------------------------------------------------
+section("Party alerts")
+H.inGroup = true
+H.sent = {}
+resetWorld()
+H.units.nameplate5 = enemy("Partyspot", "Ted", "Player-4710-00PA0001")
+local pa = ns.List:RecordTheirKill({ guid = "Player-4710-00PA0001", name = "Partyspot", surname = "Ted" })
+H.clock = H.clock + 40
+step()
+local sMsg
+for _, m in ipairs(H.sent) do if m.msg:sub(1, 2) == "S:" then sMsg = m.msg end end
+check("sighting sent to the group", sMsg ~= nil)
+ns.db.settings.partyAlertSend = false
+H.sent = {}
+H.units.nameplate5 = nil ; step(3) ; step(40)
+H.units.nameplate5 = enemy("Partyspot", "Ted", "Player-4710-00PA0001")
+step()
+check("not sent when switched off", #H.sent == 0)
+ns.db.settings.partyAlertSend = true
+-- Receiving one from a friend.
+local friendMsg = sMsg and sMsg:gsub(":[^:]*:[^:]*$", ":Player-4710-0000FRND:Kaz%%20Ironvein")
+H.clearOutput()
+H.lastSound = nil
+H.clock = H.clock + 10
+ns.Share:OnPartySighting(friendMsg, "Kaz")
+check("friend's sighting printed", H.outputContains("Kaz Ironvein spotted") and H.outputContains("from your list"))
+check("and the horn plays", H.lastSound ~= nil)
+H.clearOutput()
+ns.Share:OnPartySighting(friendMsg, "Kaz")
+check("repeat within 30s ignored", not H.outputContains("spotted"))
+H.clock = H.clock + 31
+H.clearOutput()
+ns.Share:OnPartySighting(sMsg, "Me")
+check("our own message ignored", not H.outputContains("spotted"))
+H.inGroup = false
+resetWorld()
+
+-- ---------------------------------------------------------------------------
+section("Window options and the radar dot")
+ns.Overlay.Toggle(true)
+local ov = _G.PersonalVendettaOverlay
+H.cvars.nameplateShowEnemies = "0"
+ns.Fire("SETTINGS_CHANGED")
+check("dot goes red when blind", ov.dot.blind == true)
+H.cvars.nameplateShowEnemies = "1"
+ns.Fire("SETTINGS_CHANGED")
+check("dot green when it can see", ov.dot.blind == false)
+ns.db.settings.window.autoHide = true
+clearQueue()
+ns.Overlay.SelectTab("near")
+ns.Fire("SETTINGS_CHANGED")
+check("auto-hide hides a quiet window", not ov:IsShown() and ov.autoHidden)
+H.units.nameplate5 = enemy("Partyspot", "Ted", "Player-4710-00PA0001")
+H.clock = H.clock + 40
+step()
+check("comes back when someone appears", ov:IsShown())
+ns.db.settings.window.autoHide = false
+resetWorld()
+ns.Fire("SETTINGS_CHANGED")
+
+-- ---------------------------------------------------------------------------
+section("Hit list search and sort")
+ns.Settings:Open("list")
+ns.Settings:SetSearch("partyspot")
+local vis = ns.Settings:VisibleEntries()
+check("search narrows to the match", #vis == 1 and vis[1].name == "Partyspot", #vis)
+ns.Settings:SetSearch("goldshire")
+check("search reaches the zone", #ns.Settings:VisibleEntries() >= 1)
+ns.Settings:SetSearch("")
+local all = ns.Settings:VisibleEntries()
+check("empty search shows everyone", #all == ns.List:Count(), #all .. " vs " .. ns.List:Count())
+ns.db.settings.listSort = "deaths"
+local byDeaths = ns.Settings:VisibleEntries()
+check("most deaths first", (byDeaths[1].theyKilledMe or 0) >= (byDeaths[#byDeaths].theyKilledMe or 0))
+local before = ns.db.settings.listSort
+ns.Settings:CycleSort()
+check("sort button cycles", ns.db.settings.listSort ~= before)
+ns.db.settings.listSort = "newest"
+ns.Settings:Toggle(false)
+
+-- ---------------------------------------------------------------------------
+section("Feedback")
+local fb = ns.Settings:Feedback()
+check("feedback window opens", fb:IsShown())
+check("links to the CurseForge comments", fb.url:GetText() == "https://www.curseforge.com/wow/addons/personal-vendetta-pvp/comments")
+check("version line for bug reports", (fb.info:GetText() or ""):find("Personal Vendetta 2.0", 1, true) ~= nil, fb.info:GetText())
+fb.url:SetText("typed over")
+fb.url:GetScript("OnTextChanged")(fb.url)
+check("link box is read-only", fb.url:GetText() == ns.FEEDBACK_URL)
+fb:Hide()
+
+-- ---------------------------------------------------------------------------
+section("Account-wide list")
+local charCount = ns.List:Count()
+PersonalVendettaAccountDB.list["Player-4710-00AC0001"] = { key = "Player-4710-00AC0001", guid = "Player-4710-00AC0001",
+	name = "Altkiller", surname = "Shared", theyKilledMe = 2, iKilledThem = 0, firstAdded = H.now }
+PersonalVendettaAccountDB.list["Player-4710-00PA0001"] = { key = "Player-4710-00PA0001", guid = "Player-4710-00PA0001",
+	name = "Partyspot", surname = "Ted", theyKilledMe = 4, iKilledThem = 1, firstAdded = H.now }
+local paDeaths = pa.theyKilledMe
+ns.SetAccountWide(true)
+check("shared list is in use", ns.IsAccountWide() and ns.ListData() == PersonalVendettaAccountDB.list)
+check("this character's list merged in", ns.List:Count() == charCount + 1, ns.List:Count() .. " vs " .. (charCount + 1))
+local _, merged = ns.List:Find("Player-4710-00PA0001")
+check("someone on both: scores added", merged and merged.theyKilledMe == paDeaths + 4, merged and merged.theyKilledMe)
+check("alt's kills findable", select(2, ns.List:Find(nil, "Altkiller Shared")) ~= nil)
+ns.SetAccountWide(false)
+check("off: back to the character list", ns.ListData() == ns.db.list and ns.List:Count() == charCount)
+ns.SetAccountWide(true)
+check("on again: no double merge", select(2, ns.List:Find("Player-4710-00PA0001")).theyKilledMe == paDeaths + 4)
+ns.SetAccountWide(false)
+
+-- ---------------------------------------------------------------------------
+section("Translations")
+local function specs(s) local t = {} for x in s:gmatch("%%[sd]") do t[#t + 1] = x end return table.concat(t) end
+for _, code in ipairs({ "deDE", "frFR", "esES", "ruRU" }) do
+	local tbl = ns.LocaleTables[code]
+	check(code .. " loaded", type(tbl) == "table")
+	local n, bad, empty = 0, {}, 0
+	for k, v in pairs(tbl or {}) do
+		n = n + 1
+		if specs(k) ~= specs(v) then bad[#bad + 1] = k end
+		if v == "" then empty = empty + 1 end
+	end
+	check(code .. " has every string", n >= 289, n)
+	check(code .. " keeps %s/%d in order", #bad == 0, bad[1])
+	check(code .. " has no blanks", empty == 0)
+end
+-- Every key used in the code exists in each translation.
+check("English client shows English", ns.L["Revenge!"] == "Revenge!")
+-- A German client gets German.
+H.locale = "deDE"
+local ns2 = {}
+for _, file in ipairs(FILES) do
+	if file == "Locale.lua" or file:find("^Locales/") then
+		local f = assert(io.open(ADDON_DIR .. file, "r")); local src = f:read("*a"); f:close()
+		assert(load(src, file))("PersonalVendetta", ns2)
+	end
+end
+check("German client gets German", ns2.L["Revenge!"] == "Rache!", ns2.L["Revenge!"])
+check("missing key falls back to English", ns2.L["Not a real key"] == "Not a real key")
+H.locale = "esMX"
+local ns3 = {}
+for _, file in ipairs(FILES) do
+	if file == "Locale.lua" or file:find("^Locales/") then
+		local f = assert(io.open(ADDON_DIR .. file, "r")); local src = f:read("*a"); f:close()
+		assert(load(src, file))("PersonalVendetta", ns3)
+	end
+end
+check("Mexican Spanish uses the Spanish file", ns3.L["Revenge!"] == "¡Venganza!")
+H.locale = "enUS"
+
+
+-- ---------------------------------------------------------------------------
+section("Radar dot switches nameplates both ways")
+ns.Overlay.Toggle(true)
+local ov2 = _G.PersonalVendettaOverlay
+H.cvars.nameplateShowEnemies, H.cvars.nameplateShowAll = "1", "1"
+ns.Fire("SETTINGS_CHANGED")
+ov2.dot:Click()
+check("click while seeing: nameplates off", H.cvars.nameplateShowEnemies == "0")
+check("dot turns red", ov2.dot.blind == true)
+ov2.dot:Click()
+check("click again: back on", H.cvars.nameplateShowEnemies == "1" and ov2.dot.blind == false)
+H.inCombat = true
+H.lockdown = true
+H.clearOutput()
+ns.Radar:DisableNameplates()
+check("can't switch off in combat", H.cvars.nameplateShowEnemies == "1" and H.outputContains("in combat"))
+H.inCombat, H.lockdown = false, false
+
+-- ---------------------------------------------------------------------------
+section("Sort dropdown")
+ns.Settings:Open("list")
+ns.Settings:SetSort("scum")
+check("picking an order sets it", ns.db.settings.listSort == "scum")
+check("unknown order ignored", ns.Settings:SetSort("bogus") == nil and ns.db.settings.listSort == "scum")
+ns.Settings:SetSort("newest")
+ns.Settings:Toggle(false)
+
+-- ---------------------------------------------------------------------------
+section("Quiet in cities and towns")
+local function sightQuiet(zone, sub, resting)
+	resetWorld()
+	H.zone, H.subzone, H.resting = zone, sub, resting or false
+	H.units.nameplate7 = enemy("Partyspot", "Ted", "Player-4710-00PA0001")
+	H.clock = H.clock + 60
+	H.lastSound = nil
+	H.clearOutput()
+	step()
+	local shown = ns.Radar:Get("Player-4710-00PA0001") ~= nil
+	local horn = H.lastSound ~= nil
+	local chat = H.outputContains("is near")
+	H.units.nameplate7 = nil
+	return horn, chat, shown
+end
+local snd = ns.db.settings.sound
+snd.enabled = true
+snd.quietCapitals, snd.quietTowns = false, false
+local horn, chat = sightQuiet("Stormwind City", "Trade District")
+check("options off: horn in Stormwind as before", horn and chat)
+snd.quietCapitals = true
+check("capital recognised", ns.PlaceKind() == "capital")
+local horn2, chat2, shown2 = sightQuiet("Stormwind City", "Trade District")
+check("quiet in Stormwind: no horn", not horn2)
+check("quiet in Stormwind: no chat line", not chat2)
+check("but the window still lists them", shown2)
+local horn3 = sightQuiet("Tanaris", "Gadgetzan")
+check("towns not muted by the capital option", horn3)
+snd.quietTowns = true
+check("Gadgetzan is a town", (function() H.zone, H.subzone = "Tanaris", "Gadgetzan" ; return ns.PlaceKind() == "town" end)())
+local horn4 = sightQuiet("Tanaris", "Gadgetzan")
+check("quiet in Gadgetzan", not horn4)
+local horn5 = sightQuiet("Elwynn Forest", "Lion's Pride Inn", true)
+check("quiet in an inn (rest area)", not horn5)
+local horn6 = sightQuiet("Tanaris", "Lost Rigger Cove")
+check("out in the wild: horn again", horn6)
+check("English fallback name works", (function() H.zone, H.subzone = "Tanaris", "Booty Bay" ; return ns.PlaceKind() == "town" end)())
+H.inGroup = true
+H.sent = {}
+H.zone, H.subzone = "Tanaris", "Gadgetzan"
+check("no party alert sent from a quiet town", ns.Share:SendSighting(pa) == false and #H.sent == 0)
+H.inGroup = false
+snd.quietCapitals, snd.quietTowns = false, false
+H.zone, H.subzone, H.resting = "Elwynn Forest", "Goldshire", false
+resetWorld()
 
 -- ---------------------------------------------------------------------------
 say(string.format("\n%d passed, %d failed", passed, failed))

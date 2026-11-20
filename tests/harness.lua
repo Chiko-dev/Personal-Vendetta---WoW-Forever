@@ -288,4 +288,29 @@ end
 
 function H.clearOutput() H.output = {} end
 
+-- ---------------------------------------------------------------- v1.3 stubs
+H.locale = H.locale or "enUS"
+_G.GetLocale = function() return H.locale end
+H.zone, H.subzone = "Elwynn Forest", "Goldshire"
+_G.GetRealZoneText = function() return H.zone end
+_G.GetSubZoneText = function() return H.subzone end
+H.resting = false
+_G.IsResting = function() return H.resting end
+_G.C_Map = _G.C_Map or {}
+H.areaNames = { [1519] = "Stormwind City", [976] = "Gadgetzan" }
+C_Map.GetAreaInfo = function(id) return H.areaNames[id] end
+H.plates = {}
+_G.C_NamePlate = _G.C_NamePlate or {}
+C_NamePlate.GetNamePlateForUnit = function(unit)
+	if not H.units[unit] then return nil end
+	local p = H.plates[unit]
+	if not p then
+		p = newWidget()
+		p.__forbidden = false
+		function p:IsForbidden() return self.__forbidden end
+		H.plates[unit] = p
+	end
+	return p
+end
+
 return H

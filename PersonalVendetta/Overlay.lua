@@ -13,6 +13,7 @@
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
+local L = ns.L
 
 local WIDTH = 340
 local HEADER_HEIGHT = 24
@@ -209,7 +210,7 @@ local function buildRow(index, parent, anchor)
 
 	-- Note, right on the row: write down what they did without leaving the
 	-- window.
-	row.note = flatButton(row, "+Note", 38, 16)
+	row.note = flatButton(row, "+" .. L["Note"], 38, 16)
 	row.note:SetPoint("RIGHT", -1, 0)
 	row.note:SetScript("OnClick", function()
 		if row.entry and ns.Notes then ns.Notes:Open(row.entry.key) end
@@ -218,11 +219,11 @@ local function buildRow(index, parent, anchor)
 		if not GameTooltip or not row.entry then return end
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		if row.entry.note then
-			GameTooltip:AddLine("Note", 1, 0.82, 0.3)
+			GameTooltip:AddLine(L["Note"], 1, 0.82, 0.3)
 			GameTooltip:AddLine(row.entry.note, 1, 1, 1, true)
-			GameTooltip:AddLine("Click to edit.", 0.6, 0.6, 0.6)
+			GameTooltip:AddLine(L["Click to edit."], 0.6, 0.6, 0.6)
 		else
-			GameTooltip:AddLine("Add a note: what did they do?", 1, 1, 1)
+			GameTooltip:AddLine(L["Add a note: what did they do?"], 1, 1, 1)
 		end
 		GameTooltip:Show()
 	end)
@@ -276,16 +277,16 @@ local function buildAddRow(index, parent)
 
 	-- [name            ] [x]Scum [Note] [Skip] [Add]
 	-- [killed you x2 ...]
-	row.add = flatButton(row, "Add", 34, 18, 0.15, 0.45, 0.15)
+	row.add = flatButton(row, L["Add"], 34, 18, 0.15, 0.45, 0.15)
 	row.add:SetPoint("RIGHT", -1, 0)
-	row.skip = flatButton(row, "Skip", 32, 18, 0.3, 0.3, 0.3)
+	row.skip = flatButton(row, L["Skip"], 32, 18, 0.3, 0.3, 0.3)
 	row.skip:SetPoint("RIGHT", row.add, "LEFT", -3, 0)
-	row.note = flatButton(row, "+Note", 38, 18)
+	row.note = flatButton(row, "+" .. L["Note"], 38, 18)
 	row.note:SetPoint("RIGHT", row.skip, "LEFT", -3, 0)
 
 	row.scumText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	row.scumText:SetPoint("RIGHT", row.note, "LEFT", -4, 0)
-	row.scumText:SetText("Scum")
+	row.scumText:SetText(L["Scum"])
 	row.scumText:SetTextColor(1, 0.25, 0.25)
 	row.scum = ns.CreateCheckButton(row)
 	row.scum:SetSize(20, 20)
@@ -388,7 +389,10 @@ local function buildFrame()
 	frame:SetMovable(true)
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart", frame.StartMoving)
+	frame:SetScript("OnDragStart", function(self)
+		if ns.db.settings.window.locked then return end
+		self:StartMoving()
+	end)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
 		savePosition()
@@ -405,15 +409,44 @@ local function buildFrame()
 		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
 	end
 
+	-- Radar status: green when enemy nameplates are on and the radar can see,
+	-- red when it is blind. Click to switch them on or off.
+	local dot = CreateFrame("Button", nil, frame)
+	dot:SetSize(12, 12)
+	dot:SetPoint("TOPLEFT", 7, -6)
+	dot.tex = solidTexture(dot, "ARTWORK", 0.2, 0.9, 0.2, 1)
+	dot.tex:SetPoint("CENTER")
+	dot.tex:SetSize(8, 8)
+	dot:SetScript("OnClick", function(self)
+		if not ns.Radar then return end
+		if ns.Radar:NameplatesOn() then ns.Radar:DisableNameplates() else ns.Radar:EnableNameplates() end
+		if self:IsMouseOver() and self:GetScript("OnEnter") then self:GetScript("OnEnter")(self) end
+	end)
+	dot:SetScript("OnEnter", function(self)
+		if not GameTooltip then return end
+		GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+		if ns.Radar and ns.Radar:NameplatesOn() then
+			GameTooltip:AddLine("|cff44ff44" .. L["Radar on"] .. "|r")
+			GameTooltip:AddLine(string.format(L["Watching up to %s yards around you."], ns.Radar:GetRange()), 1, 1, 1, true)
+			GameTooltip:AddLine(L["Click to switch enemy nameplates off."], 0.7, 0.7, 0.7, true)
+		else
+			GameTooltip:AddLine("|cffff4444" .. L["Radar blind"] .. "|r")
+			GameTooltip:AddLine(L["Enemy nameplates are off, so nobody can be spotted. Click to switch them on."], 1, 1, 1, true)
+		end
+		GameTooltip:Show()
+	end)
+	dot:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+	frame.dot = dot
+
 	frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	frame.title:SetPoint("TOPLEFT", 8, -6)
+	frame.title:SetPoint("TOPLEFT", 22, -6)
 	frame.title:SetJustifyH("LEFT")
-	frame.title:SetWidth(WIDTH - 86 - 74 - 24)
+	frame.title:SetWidth(WIDTH - 86 - 74 - 38)
 	frame.title:SetWordWrap(false)
 
-	local addTab = buildTab("add", "To add")
+	local addTab = buildTab("add", L["To add"])
 	addTab:SetPoint("TOPRIGHT", -4, -3)
-	local nearTab = buildTab("near", "Nearby")
+	local nearTab = buildTab("near", L["Nearby"])
 	nearTab:SetPoint("RIGHT", addTab, "LEFT", -3, 0)
 
 	rows = {}
@@ -439,11 +472,10 @@ local function buildFrame()
 	addPage.empty:SetPoint("TOPRIGHT", -2, -6)
 	addPage.empty:SetJustifyH("LEFT")
 	addPage.empty:SetWordWrap(true)
-	addPage.empty:SetText("Nobody to review. Players who kill you, or who you fight off, "
-		.. "wait here so you can add them when it suits you.")
+	addPage.empty:SetText(L["Nobody to review. Players who kill you, or who you fight off, wait here so you can add them when it suits you."])
 
-	addPage.addAll = flatButton(addPage, "Add all", 70, 20, 0.15, 0.45, 0.15)
-	addPage.skipAll = flatButton(addPage, "Skip all", 64, 20, 0.3, 0.3, 0.3)
+	addPage.addAll = flatButton(addPage, L["Add all"], 70, 20, 0.15, 0.45, 0.15)
+	addPage.skipAll = flatButton(addPage, L["Skip all"], 64, 20, 0.3, 0.3, 0.3)
 	addPage.info = addPage:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	addPage.addAll:SetScript("OnClick", function() ns.Pending:AddAll() end)
 	addPage.skipAll:SetScript("OnClick", function() ns.Pending:SkipAll() end)
@@ -481,7 +513,7 @@ local function renderNear()
 			end
 			row.score:SetText(string.format("|cffff6666%d|r/|cff66ff66%d|r",
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
-			row.note:SetLabel(entry.note and "|cffffd100Note|r" or "|cffaaaaaa+Note|r")
+			row.note:SetLabel(entry.note and ("|cffffd100" .. L["Note"] .. "|r") or ("|cffaaaaaa+" .. L["Note"] .. "|r"))
 			row.entry = entry
 			row:Show()
 
@@ -528,7 +560,7 @@ local function renderAdd()
 			if it.note then detail = detail .. "  |cffffd100\"" .. it.note .. "\"|r" end
 			row.detail:SetText(detail)
 			row.scum:SetChecked(it.scum and true or false)
-			row.note:SetLabel(it.note and "|cffffd100Note|r" or "|cffaaaaaa+Note|r")
+			row.note:SetLabel(it.note and ("|cffffd100" .. L["Note"] .. "|r") or ("|cffaaaaaa+" .. L["Note"] .. "|r"))
 			row.id, row.item = it.id, it
 			row:Show()
 			if newPending[it.id] then
@@ -555,17 +587,26 @@ local function renderAdd()
 	addPage.skipAll:SetPoint("RIGHT", addPage.addAll, "LEFT", -4, 0)
 	addPage.info:SetPoint("LEFT", addPage, "TOPLEFT", 2, -(bodyHeight + 14))
 	if total > ADD_ROWS then
-		addPage.info:SetText(string.format("%d-%d of %d, scroll for more",
+		addPage.info:SetText(string.format(L["%d-%d of %d, scroll for more"],
 			addOffset + 1, math.min(total, addOffset + ADD_ROWS), total))
 	else
-		addPage.info:SetText(total == 1 and "1 waiting" or (total .. " waiting"))
+		addPage.info:SetText(string.format(L["%d waiting"], total))
 	end
 
 	return bodyHeight + ((total > 0) and FOOTER_HEIGHT or 0)
 end
 
+-- Scale, background opacity. Position lock is checked at drag time.
+local function applyWindowOptions()
+	if not frame then return end
+	local w = ns.db.settings.window
+	frame:SetScale(math.max(0.6, math.min(1.6, w.scale or 1)))
+	frame.bgAlpha = math.max(0, math.min(1, w.opacity or 0.55))
+end
+
 refresh = function()
 	if not frame then return end
+	applyWindowOptions()
 
 	local total = ns.List:Count()
 	local count = ns.Radar and ns.Radar:Count() or 0 -- the living ones
@@ -584,16 +625,25 @@ refresh = function()
 
 	-- Header
 	if count > 0 then
-		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cffff4444%d near|r%s", count,
-			scumNear > 0 and string.format("  %s%s%d scum|r", ns.SKULL, ns.SCUM_COLOR, scumNear) or ""))
+		frame.title:SetText("|cff9933ffVendetta|r  |cffff4444" .. string.format(L["%d near"], count) .. "|r"
+			.. (scumNear > 0 and ("  " .. ns.SKULL .. ns.SCUM_COLOR .. string.format(L["%d scum"], scumNear) .. "|r") or ""))
 		frame:SetBackdropBorderColor(0.9, 0.2, 0.2, 0.95)
 	else
-		frame.title:SetText(string.format("|cff9933ffVendetta|r  |cff888888%d on list|r", total))
+		frame.title:SetText("|cff9933ffVendetta|r  |cff888888" .. string.format(L["%d on list"], total) .. "|r")
 		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
 	end
+	if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, frame.bgAlpha or 0.55) end
 
-	tabs.near.text:SetText(count > 0 and string.format("Nearby |cffff4444%d|r", count) or "Nearby")
-	tabs.add.text:SetText(pendingCount > 0 and string.format("To add |cffffd100%d|r", pendingCount) or "To add")
+	local seeing = ns.Radar and ns.Radar:NameplatesOn()
+	if seeing then
+		frame.dot.tex:SetColorTexture(0.2, 0.9, 0.2, 1)
+	else
+		frame.dot.tex:SetColorTexture(1, 0.15, 0.15, 1)
+	end
+	frame.dot.blind = not seeing
+
+	tabs.near.text:SetText(count > 0 and (L["Nearby"] .. " |cffff4444" .. count .. "|r") or L["Nearby"])
+	tabs.add.text:SetText(pendingCount > 0 and (L["To add"] .. " |cffffd100" .. pendingCount .. "|r") or L["To add"])
 	for key, tab in pairs(tabs) do
 		local on = (key == currentTab)
 		tab.bg:SetAlpha(on and 1 or 0.35)
@@ -622,14 +672,34 @@ refresh = function()
 		height = HEADER_HEIGHT + (shown * ROW_HEIGHT) + (shown > 0 and 6 or 0)
 	end
 	frame:SetHeight(height)
+
+	-- Auto-hide: out of the way entirely while there is nothing to show.
+	-- The window comes back on its own when someone appears or is queued.
+	if ns.db.settings.overlayShown ~= false then
+		local quiet = count == 0 and pendingCount == 0 and currentTab == "near"
+		local hide = ns.db.settings.window.autoHide and quiet
+		if hide and frame:IsShown() then
+			frame:Hide()
+			frame.autoHidden = true
+		elseif not hide and frame.autoHidden then
+			frame.autoHidden = nil
+			frame:Show()
+		end
+	end
 end
 
 local function alert(entries)
 	if not entries or #entries == 0 then return end
 
 	local anyScum = false
+	-- In a city or town you asked to be quiet in: the window still shows
+	-- them, but no chat line and no horn.
+	local quiet = ns.InQuietPlace and ns.InQuietPlace()
 	for _, entry in ipairs(entries) do
 		if entry.key then pendingFlash[entry.key] = true end
+		if quiet then
+			-- nothing in chat
+		else
 		local noteBit = ""
 		if entry.note then
 			local n = entry.note
@@ -638,12 +708,12 @@ local function alert(entries)
 		end
 		if entry.scum then
 			anyScum = true
-			ns.Print(string.format("%s %sSCUM %s is near.|r Must kill. %d to %d.%s",
-				ns.SKULL, ns.SCUM_COLOR, ns.FullName(entry),
-				entry.theyKilledMe or 0, entry.iKilledThem or 0, noteBit))
+			ns.Print(ns.SKULL .. " " .. ns.SCUM_COLOR .. L["SCUM"] .. "|r " .. string.format(L["%s is near. Must kill. %d to %d."],
+				ns.SCUM_COLOR .. ns.FullName(entry) .. "|r", entry.theyKilledMe or 0, entry.iKilledThem or 0) .. noteBit)
 		else
-			ns.Print(string.format("|cffff4444%s|r is near. %d to %d.%s",
-				ns.FullName(entry), entry.theyKilledMe or 0, entry.iKilledThem or 0, noteBit))
+			ns.Print(string.format(L["%s is near. %d to %d."],
+				"|cffff4444" .. ns.FullName(entry) .. "|r", entry.theyKilledMe or 0, entry.iKilledThem or 0) .. noteBit)
+		end
 		end
 	end
 
@@ -663,8 +733,8 @@ local function ensureFrame()
 	if frame then return true end
 	local ok, err = pcall(buildFrame)
 	if not ok then
-		ns.Print("|cffff4444could not build the window:|r " .. tostring(err))
-		ns.Print("The list and the tracking still work. |cffffd100/vendetta list|r shows it in chat.")
+		ns.Print("|cffff4444" .. L["Could not build the window:"] .. "|r " .. tostring(err))
+		ns.Print(L["The list and the tracking still work. /vendetta list shows it in chat."])
 		return false
 	end
 	return true
@@ -672,7 +742,8 @@ end
 
 local function toggle(show)
 	if not ensureFrame() then return end
-	if show == nil then show = not frame:IsShown() end
+	if show == nil then show = not (frame:IsShown() or frame.autoHidden) end
+	frame.autoHidden = nil
 	frame:SetShown(show)
 	ns.db.settings.overlayShown = show
 	if show then refresh() end
@@ -693,10 +764,10 @@ end
 local function printList()
 	local entries = ns.List:ByDateAdded()
 	if #entries == 0 then
-		ns.Print("The list is empty. Go get killed by someone.")
+		ns.Print(L["The list is empty. Go get killed by someone."])
 		return
 	end
-	ns.Print("Hit list, newest first:")
+	ns.Print(L["Hit list, newest first:"])
 	for _, e in ipairs(entries) do
 		local nearNow = ns.Radar and ns.Radar.nearby[e.key]
 		local name = ns.FullName(e)
@@ -706,17 +777,16 @@ local function printList()
 			name,
 			levelText(e, nearNow),
 			e.className and (" " .. e.className) or "",
-			nearNow and "|cffff4444<< NEAR|r" or ("seen " .. ns.Ago(e.lastSeen))))
+			nearNow and ("|cffff4444<< " .. L["NEAR"] .. "|r") or string.format(L["seen %s"], ns.Ago(e.lastSeen))))
 	end
 end
 
 -- "Not on the list", or -- when a first name fits two people -- ask for the surname.
 local function notFound(arg, count)
 	if count and count > 1 then
-		ns.Print(string.format("%d people on your list are called %s. Use the full name, e.g. "
-			.. "|cffffd100%s Surname|r.", count, arg, arg))
+		ns.Print(string.format(L["%d people on your list are called %s. Use the full name, e.g. %s Surname."], count, arg, arg))
 	else
-		ns.Print("Not on the list: " .. arg)
+		ns.Print(string.format(L["Not on the list: %s"], arg))
 	end
 end
 
@@ -734,32 +804,32 @@ local function handleCommand(msg)
 		if arg == "" then
 			-- No name: add whoever you have targeted, with everything we can read.
 			if not (ns.Radar and ns.Radar.IsEnemyPlayer("target")) then
-				ns.Print("Target an enemy player, or use |cffffd100/vendetta add <first> <surname>|r.")
+				ns.Print(L["Target an enemy player, or use /vendetta add <first> <surname>."])
 				return
 			end
 			local info = ns.Radar:ReadUnitInfo("target")
 			local _, existing = ns.List:Find(info.guid, info.name, info.surname)
 			if existing then
-				ns.Print(ns.FullName(existing) .. " is already on the list.")
+				ns.Print(string.format(L["%s is already on the list."], ns.FullName(existing)))
 				return
 			end
 			local entry = ns.List:AddFromFight(info)
-			if entry then ns.Print("Added |cffff4444" .. ns.FullName(entry) .. "|r from your target.") end
+			if entry then ns.Print(string.format(L["Added %s from your target."], "|cffff4444" .. ns.FullName(entry) .. "|r")) end
 			return
 		end
 		local _, existing = ns.List:Find(nil, arg)
 		if existing then
-			ns.Print(ns.FullName(existing) .. " is already on the list.")
+			ns.Print(string.format(L["%s is already on the list."], ns.FullName(existing)))
 			return
 		end
 		local _, entry = ns.List:Upsert({ name = arg })
 		if entry then
-			ns.Print("Added |cffff4444" .. ns.FullName(entry) .. "|r by hand.")
+			ns.Print(string.format(L["Added %s by hand."], "|cffff4444" .. ns.FullName(entry) .. "|r"))
 			ns.Fire("LIST_CHANGED")
 		end
 	elseif cmd == "remove" or cmd == "forgive" then
 		if arg == "" then
-			ns.Print("Usage: /vendetta remove <name>")
+			ns.Print(L["Usage: /vendetta remove <name>"])
 			return
 		end
 		local _, entry, count = ns.List:Find(nil, arg)
@@ -768,8 +838,21 @@ local function handleCommand(msg)
 			return
 		end
 		local full = ns.FullName(entry)
-		ns.List:Remove(entry.guid, full)
-		ns.Print("Removed " .. full .. ". Generous of you.")
+		local snapshot = ns.List:RemoveKey(entry.key)
+		ns.Print(string.format(L["Removed %s. Generous of you."], full))
+		if snapshot and ns.Toast then
+			ns.Toast:Undo(string.format(L["Removed %s."], full), function() ns.List:Restore(snapshot) end)
+		end
+	elseif cmd == "detail" or cmd == "details" or cmd == "info" then
+		local _, entry, count = ns.List:Find(nil, arg)
+		if not entry then
+			if arg == "" then ns.Print(L["Usage: /vendetta detail <name>"]) else notFound(arg, count) end
+			return
+		end
+		ns.Detail:Open(entry.key)
+	elseif cmd == "feedback" or cmd == "bug" or cmd == "about" then
+		ns.Print(string.format(L["Personal Vendetta %s. Feedback and bug reports: %s"], ns.VERSION, ns.FEEDBACK_URL))
+		ns.Settings:Feedback()
 	elseif cmd == "share" then
 		if ns.Share then ns.Share:Send() end
 	elseif cmd == "recap" then
@@ -781,7 +864,7 @@ local function handleCommand(msg)
 		end
 		local n = tonumber(arg)
 		if not n then
-			ns.Print("Radar range is " .. ns.Radar:GetRange() .. " yards. Usage: /vendetta range 41")
+			ns.Print(string.format(L["Radar range is %s yards. Usage: /vendetta range 41"], ns.Radar:GetRange()))
 		else
 			ns.Radar:SetRange(n)
 		end
@@ -801,6 +884,11 @@ local function handleCommand(msg)
 			.. ns.Sound:Current("scum").label .. " " .. math.floor(ns.Sound:Volume("scum") * 100 + 0.5) .. "%")
 			or "|cffff4444MISSING|r"))
 		print("  Plates  " .. (ns.Radar and (ns.Radar:NameplatesOn() and "|cff44ff44on|r" or "|cffff4444OFF|r") or "?"))
+		print("  Extras  " .. "Toast " .. (ns.Toast and "|cff44ff44ok|r" or "|cffff4444MISSING|r")
+			.. "  Detail " .. (ns.Detail and "|cff44ff44ok|r" or "|cffff4444MISSING|r")
+			.. "  Marks " .. (ns.Marks and ("|cff44ff44ok|r (" .. ns.Marks:Count() .. ")") or "|cffff4444MISSING|r")
+			.. "  Locale " .. tostring(ns.LOCALE)
+			.. "  Shared list " .. (ns.IsAccountWide() and "on" or "off"))
 		print("  Options " .. (ns.Settings and "|cff44ff44loaded|r" or "|cffff4444MISSING|r")
 			.. "   Minimap " .. (ns.Minimap and "|cff44ff44loaded|r" or "|cffff4444MISSING|r"))
 		print("  Window  " .. (frame and "|cff44ff44built|r" or "|cffffd100not built yet|r"))
@@ -812,7 +900,7 @@ local function handleCommand(msg)
 	elseif cmd == "sound" then
 		local s = ns.db.settings.sound
 		s.enabled = not s.enabled
-		ns.Print("Sighting sound " .. (s.enabled and "on" or "off") .. ".")
+		ns.Print(s.enabled and L["Sighting sounds on."] or L["Sighting sounds off."])
 		ns.Fire("SETTINGS_CHANGED")
 	elseif cmd == "options" or cmd == "config" or cmd == "settings" then
 		ns.Settings:Toggle()
@@ -820,7 +908,7 @@ local function handleCommand(msg)
 		ns.Radar:EnableNameplates()
 	elseif cmd == "scum" or cmd == "unscum" then
 		if arg == "" then
-			ns.Print("Usage: /vendetta " .. cmd .. " <name>")
+			ns.Print(string.format(L["Usage: /vendetta %s <name>"], cmd))
 			return
 		end
 		local key, entry, count = ns.List:Find(nil, arg)
@@ -829,19 +917,18 @@ local function handleCommand(msg)
 			return
 		end
 		ns.List:SetScum(key, cmd == "scum")
-		ns.Print(string.format("%s is %s.", ns.FullName(entry),
-			cmd == "scum" and (ns.SCUM_COLOR .. "scum|r now") or "no longer scum"))
+		ns.Print(string.format(cmd == "scum" and L["%s is scum now."] or L["%s is no longer scum."], ns.FullName(entry)))
 	elseif cmd == "kill" or cmd == "unkill" or cmd == "death" or cmd == "undeath" then
 		-- Hand corrections, for when detection misses one or double counts.
 		if arg == "" then
-			ns.Print("Usage: /vendetta " .. cmd .. " <name>")
+			ns.Print(string.format(L["Usage: /vendetta %s <name>"], cmd))
 			return
 		end
 		local field = (cmd == "kill" or cmd == "unkill") and "iKilledThem" or "theyKilledMe"
 		local delta = (cmd == "kill" or cmd == "death") and 1 or -1
 		local entry, count = ns.List:Adjust(arg, field, delta)
 		if entry then
-			ns.Print(string.format("%s: now %d to %d.", ns.FullName(entry),
+			ns.Print(string.format(L["%s: now %d to %d."], ns.FullName(entry),
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
 		else
 			notFound(arg, count)
@@ -849,37 +936,39 @@ local function handleCommand(msg)
 	elseif cmd == "note" then
 		local _, entry, count = ns.List:Find(nil, arg)
 		if not entry then
-			if arg == "" then ns.Print("Usage: /vendetta note <name>") else notFound(arg, count) end
+			if arg == "" then ns.Print(L["Usage: /vendetta note <name>"]) else notFound(arg, count) end
 			return
 		end
 		ns.Notes:Open(entry.key)
 	elseif cmd == "wipe" then
 		if arg == "confirm" then
 			ns.List:Wipe()
-			ns.Print("List wiped.")
+			ns.Print(L["List wiped."])
 		else
-			ns.Print("This clears everyone. Type |cffffd100/vendetta wipe confirm|r if you mean it.")
+			ns.Print(L["This clears everyone. Type /vendetta wipe confirm if you mean it."])
 		end
 	else
-		ns.Print("Commands:")
-		print("  |cffffd100/vendetta|r  toggle the window")
-		print("  |cffffd100/vendetta review|r  open the To add tab")
-		print("  |cffffd100/vendetta list|r  print the list, marking who is near")
-		print("  |cffffd100/vendetta add|r  add your current target")
-		print("  |cffffd100/vendetta add <first> <surname>|r  add someone by name")
-		print("  |cffffd100/vendetta remove <name>|r  take someone off")
-		print("  |cffffd100/vendetta note <name>|r  write a note on someone")
-		print("  |cffffd100/vendetta share|r  share your list with your party")
-		print("  |cffffd100/vendetta recap|r  re-read your last death")
-		print("  |cffffd100/vendetta options|r  open settings (or click the minimap skull)")
-		print("  |cffffd100/vendetta kill <name>|r / |cffffd100unkill|r  fix your kill count by hand")
-		print("  |cffffd100/vendetta death <name>|r / |cffffd100undeath|r  fix their kill count by hand")
-		print("  |cffffd100/vendetta scum <name>|r / |cffffd100unscum|r  mark or clear scum")
-		print("  |cffffd100/vendetta nameplates|r  switch on the enemy nameplates the radar needs")
-		print("  |cffffd100/vendetta range [n]|r  show or push nameplate radar range")
-		print("  |cffffd100/vendetta sound|r  toggle the sighting sounds")
-		print("  |cffffd100/vendetta debug|r  what loaded and what did not")
-		print("  |cffffd100/vendetta wipe confirm|r  clear everyone")
+		ns.Print(L["Commands:"])
+		print("  |cffffd100/vendetta|r  " .. L["toggle the window"])
+		print("  |cffffd100/vendetta review|r  " .. L["open the To add tab"])
+		print("  |cffffd100/vendetta list|r  " .. L["print the list, marking who is near"])
+		print("  |cffffd100/vendetta add|r  " .. L["add your current target"])
+		print("  |cffffd100/vendetta add <first> <surname>|r  " .. L["add someone by name"])
+		print("  |cffffd100/vendetta remove <name>|r  " .. L["take someone off"])
+		print("  |cffffd100/vendetta note <name>|r  " .. L["write a note on someone"])
+		print("  |cffffd100/vendetta share|r  " .. L["share your list with your party"])
+		print("  |cffffd100/vendetta recap|r  " .. L["re-read your last death"])
+		print("  |cffffd100/vendetta options|r  " .. L["open settings (or click the minimap skull)"])
+		print("  |cffffd100/vendetta kill <name>|r / |cffffd100unkill|r  " .. L["fix your kill count by hand"])
+		print("  |cffffd100/vendetta death <name>|r / |cffffd100undeath|r  " .. L["fix their kill count by hand"])
+		print("  |cffffd100/vendetta scum <name>|r / |cffffd100unscum|r  " .. L["mark or clear scum"])
+		print("  |cffffd100/vendetta nameplates|r  " .. L["switch on the enemy nameplates the radar needs"])
+		print("  |cffffd100/vendetta range [n]|r  " .. L["show or push nameplate radar range"])
+		print("  |cffffd100/vendetta sound|r  " .. L["toggle the sighting sounds"])
+		print("  |cffffd100/vendetta detail <name>|r  " .. L["everything known about someone"])
+		print("  |cffffd100/vendetta feedback|r  " .. L["link to leave feedback or report a bug"])
+		print("  |cffffd100/vendetta debug|r  " .. L["what loaded and what did not"])
+		print("  |cffffd100/vendetta wipe confirm|r  " .. L["clear everyone"])
 	end
 end
 
@@ -898,6 +987,7 @@ end)
 ns.On("LIST_CHANGED", function() refresh() end)
 ns.On("RADAR_CHANGED", function() refresh() end)
 ns.On("SIGHTED", alert)
+ns.On("SETTINGS_CHANGED", function() refresh() end)
 ns.On("PENDING_CHANGED", function(added)
 	if type(added) == "table" then
 		for _, it in ipairs(added) do newPending[it.id] = true end

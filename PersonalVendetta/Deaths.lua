@@ -8,6 +8,7 @@
 ---------------------------------------------------------------------------]]
 
 local ADDON, ns = ...
+local L = ns.L
 
 local POLL_TRIES = 6     -- the recap fills in a moment after you die
 local POLL_DELAY = 1.0
@@ -134,8 +135,8 @@ local function handleKillers(killers)
 
 	if #repeats > 0 and db.settings.announceRepeat then
 		for _, entry in ipairs(repeats) do
-			ns.Print(string.format("|cffff4444%s|r got you again. That is %d to %d.",
-				ns.FullName(entry), entry.theyKilledMe or 0, entry.iKilledThem or 0))
+			ns.Print(string.format(L["%s got you again. That is %d to %d."],
+				"|cffff4444" .. ns.FullName(entry) .. "|r", entry.theyKilledMe or 0, entry.iKilledThem or 0))
 		end
 	end
 
@@ -200,18 +201,18 @@ ns.Deaths = {
 	ReadNow = function()
 		local events = getRecapEvents()
 		if not events then
-			ns.Print("No death recap available right now.")
+			ns.Print(L["No death recap available right now."])
 			return
 		end
 		local killers = extractKillers(events)
 		if #killers == 0 then
-			ns.Print("Last death was not caused by an enemy player.")
+			ns.Print(L["Last death was not caused by an enemy player."])
 			return
 		end
-		ns.Print("Last death, " .. #killers .. " player source(s):")
+		ns.Print(string.format(L["Last death, enemy players involved: %d"], #killers))
 		for _, k in ipairs(killers) do
 			ns.Print(string.format("  %s%s%s", ns.FullName(k.name, k.surname),
-				k.killingBlow and " |cffffd100(killing blow)|r" or "",
+				k.killingBlow and (" |cffffd100(" .. L["killing blow"] .. ")|r") or "",
 				k.spell and (" -- " .. k.spell) or ""))
 		end
 		-- Re-reading a death already counted: queue anyone missing, count nothing.
