@@ -12,7 +12,7 @@
 
 local ADDON, ns = ...
 
-ns.VERSION = "2.0"
+ns.VERSION = "3.0"
 ns.PREFIX = "|cff9933ffVendetta|r "
 
 -- Art. The icon ships in Media\; WoW finds icon.tga without the extension.
@@ -110,6 +110,8 @@ local DEFAULTS = {
 		celebrate = true,        -- toast and fanfare when you settle a score
 		partyAlertSend = true,   -- tell your group when you spot someone
 		partyAlertReceive = true,
+		scumWarnButton = true,   -- Warn button on scum rows in the floating window
+		scumWarnParty = true,    -- post scum sightings in party/raid chat
 		listSort = "newest",
 	},
 	lastRecapSig = nil,
@@ -403,12 +405,26 @@ function ns.Zone()
 	return zone or sub
 end
 
--- event: "died" (they killed you), "killed" (you killed them), "fought",
--- "seen", "added", "shared".
+-- Map coordinates where you stand, "42, 65", when the game will say.
+function ns.Coords()
+	if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
+	local okM, map = ns.try(C_Map.GetBestMapForUnit, "player")
+	map = okM and ns.num(map)
+	if not map then return nil end
+	local okP, pos = ns.try(C_Map.GetPlayerMapPosition, map, "player")
+	if not okP or type(pos) ~= "table" or not pos.GetXY then return nil end
+	local okX, x, y = pcall(pos.GetXY, pos)
+	x, y = okX and ns.num(x), okX and ns.num(y)
+	if not x or not y or (x == 0 and y == 0) then return nil end
+	return string.format("%d, %d", math.floor(x * 100 + 0.5), math.floor(y * 100 + 0.5))
+end
+
+-- event: "died" (they killed you), "killed" (you won), "fought" (you both
+-- walked away), "seen", "added", "shared". Where it happened is kept too.
 function List:Log(entry, event, extra)
 	if not entry then return end
 	entry.history = entry.history or {}
-	local h = { t = time(), e = event, z = ns.Zone(), lv = entry.level }
+	local h = { t = time(), e = event, z = ns.Zone(), xy = ns.Coords(), lv = entry.level }
 	if extra then for k, v in pairs(extra) do h[k] = v end end
 	entry.history[#entry.history + 1] = h
 	while #entry.history > HISTORY_MAX do table.remove(entry.history, 1) end
@@ -535,7 +551,9 @@ function List:RecordTheirKill(info)
 	entry.lastKilledMe = time()
 	entry.lastSeen = time() -- they were standing over you
 	entry.streak = 0
-	List:Log(entry, "died")
+	-- How: the spell that hit you, whether it was the killing blow, and how
+	-- many of them there were.
+	List:Log(entry, "died", { sp = ns.str(info.spell), kb = info.killingBlow and true or nil, n = info.n })
 	ns.Fire("LIST_CHANGED")
 	return entry
 end
@@ -773,6 +791,24 @@ function ns.InQuietPlace()
 	if kind == "capital" then return s.quietCapitals and true or false end
 	if kind == "town" then return s.quietTowns and true or false end
 	return false
+end
+
+-- Walking into or out of a quiet place changes what the radar dot shows.
+do
+	local watcher = CreateFrame("Frame")
+	local wasQuiet
+	for _, ev in ipairs({ "ZONE_CHANGED", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED_INDOORS",
+		"PLAYER_UPDATE_RESTING", "PLAYER_ENTERING_WORLD" }) do
+		pcall(watcher.RegisterEvent, watcher, ev)
+	end
+	watcher:SetScript("OnEvent", function()
+		if not ns.db then return end
+		local quiet = ns.InQuietPlace()
+		if quiet ~= wasQuiet then
+			wasQuiet = quiet
+			ns.Fire("QUIET_CHANGED", quiet)
+		end
+	end)
 end
 
 -- A checkbox from Blizzard's template, or drawn by hand if it is missing.

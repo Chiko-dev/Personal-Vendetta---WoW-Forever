@@ -95,9 +95,17 @@ local function offer()
 
 	local now = time()
 	local candidates = {}
+	local logged = false
 	for k, rec in pairs(found) do
 		local info = rec.info
 		local _, onList = ns.List:Find(info.guid, info.name, info.surname)
+		-- Someone already on your list, and you both walked away: the
+		-- history says so. (If they dropped, the kill is logged as a win.)
+		if onList and not rec.dead then
+			ns.List:Log(onList, "fought")
+			onList.lastSeen = now
+			logged = true
+		end
 		local skippedAt = skipped[k]
 		local recentlySkipped = skippedAt and (now - skippedAt) < SKIP_MEMORY
 		if not onList and not recentlySkipped and (info.guid or info.name) then
@@ -116,6 +124,8 @@ local function offer()
 			}
 		end
 	end
+
+	if logged then ns.Fire("LIST_CHANGED") end
 
 	if #candidates > 0 then
 		-- The ones you dropped first, then by name.

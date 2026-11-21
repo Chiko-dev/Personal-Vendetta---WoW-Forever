@@ -299,6 +299,14 @@ _G.IsResting = function() return H.resting end
 _G.C_Map = _G.C_Map or {}
 H.areaNames = { [1519] = "Stormwind City", [976] = "Gadgetzan" }
 C_Map.GetAreaInfo = function(id) return H.areaNames[id] end
+H.mapPos = { 0.4237, 0.6512 }
+C_Map.GetBestMapForUnit = function() return 1429 end
+C_Map.GetPlayerMapPosition = function()
+	if not H.mapPos then return nil end
+	return { GetXY = function() return H.mapPos[1], H.mapPos[2] end }
+end
+H.chat = {}
+C_ChatInfo.SendChatMessage = function(msg, chatType) H.chat[#H.chat + 1] = { msg = msg, type = chatType } end
 H.plates = {}
 _G.C_NamePlate = _G.C_NamePlate or {}
 C_NamePlate.GetNamePlateForUnit = function(unit)

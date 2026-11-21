@@ -65,6 +65,60 @@ end
 
 function Pending:Count() return #items() end
 
+-- ===========================================================================
+-- Undo, in place: a player you just added or skipped keeps their row for a
+-- few seconds, with Undo where Add was. No pop-up in the middle of the screen.
+-- ===========================================================================
+
+Pending.UNDO_SECONDS = 10
+local recent = {}   -- newest first: { rid, label, kind, undo, expires }
+local nextRid = 1
+
+local function pruneRecent()
+	local now = GetTime()
+	for i = #recent, 1, -1 do
+		if recent[i].expires <= now then table.remove(recent, i) end
+	end
+end
+
+local function pushRecent(label, kind, undo)
+	local r = { rid = nextRid, label = label, kind = kind, undo = undo,
+		expires = GetTime() + Pending.UNDO_SECONDS }
+	nextRid = nextRid + 1
+	table.insert(recent, 1, r)
+	while #recent > 6 do table.remove(recent) end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(Pending.UNDO_SECONDS + 0.1, function()
+			pruneRecent()
+			ns.Fire("PENDING_CHANGED")
+		end)
+	end
+	return r
+end
+
+-- Rows that can still be undone, newest first.
+function Pending:Recent()
+	pruneRecent()
+	return recent
+end
+
+function Pending:ClearRecent()
+	for i = #recent, 1, -1 do recent[i] = nil end
+end
+
+function Pending:Undo(rid)
+	pruneRecent()
+	for i, r in ipairs(recent) do
+		if r.rid == rid then
+			table.remove(recent, i)
+			r.undo()
+			ns.Fire("PENDING_CHANGED")
+			return true
+		end
+	end
+	return false
+end
+
 function Pending:UnseenCount()
 	local n = 0
 	for _, it in ipairs(items()) do if not it.seen then n = n + 1 end end
@@ -127,7 +181,13 @@ function Pending:Offer(c, mode)
 		or (mode == "fight" and (c.killedByMe and "killed" or "fought")) or nil
 	if event then
 		it.events = it.events or {}
-		it.events[#it.events + 1] = { t = time(), e = event, z = ns.Zone(), lv = c.level }
+		local ev = { t = time(), e = event, z = ns.Zone(), xy = ns.Coords(), lv = c.level }
+		if event == "died" then
+			ev.sp = ns.str(c.spell)
+			ev.kb = c.killingBlow and true or nil
+			ev.n = c.n
+		end
+		it.events[#it.events + 1] = ev
 		while #it.events > 20 do table.remove(it.events, 1) end
 	end
 
@@ -183,8 +243,11 @@ function Pending:Add(id, quiet)
 	local it = self:Get(id)
 	if not it then return nil end
 
+	local snap = ns.CopyTable(it)
 	local info = {}
 	for _, f in ipairs(INFO_FIELDS) do info[f] = it[f] end
+	local beforeKey, before = ns.List:Find(info.guid, info.name, info.surname)
+	before = before and ns.CopyTable(before)
 	local key, entry = ns.List:Upsert(info)
 	remove(id)
 	if not entry then
@@ -208,7 +271,20 @@ function Pending:Add(id, quiet)
 		if it.events[#it.events].z then entry.lastZone = it.events[#it.events].z end
 	end
 
+	entry._undoAdd = function()
+		if before then
+			ns.ListData()[beforeKey] = before
+			ns.List:Reindex()
+			ns.Fire("LIST_CHANGED")
+		else
+			ns.List:RemoveKey(key)
+		end
+		Pending:Restore({ snap })
+	end
+
 	if not quiet then
+		local undoFn = entry._undoAdd
+		pushRecent(string.format(L["Added %s."], ns.FullName(entry)), "added", undoFn)
 		local name = ns.FullName(entry)
 		if entry.scum then
 			ns.Print(string.format(L["%s added to the list as scum."], ns.SCUM_COLOR .. name .. "|r"))
@@ -216,9 +292,11 @@ function Pending:Add(id, quiet)
 			ns.Print(string.format(L["%s added to the list."], "|cffff4444" .. name .. "|r"))
 		end
 	end
+	local undoAdd = entry._undoAdd
+	entry._undoAdd = nil
 	ns.Fire("LIST_CHANGED")
 	ns.Fire("PENDING_CHANGED")
-	return entry
+	return entry, undoAdd
 end
 
 -- Put skipped players back, for Undo.
@@ -236,28 +314,39 @@ function Pending:Restore(snapshots)
 end
 
 -- Let them go. Someone you only fought is not offered again for a while.
--- quiet: no Undo toast (Skip all shows one for the lot).
+-- quiet: no Undo row of its own (Skip all keeps one for the lot).
 function Pending:Skip(id, quiet)
 	if ns.Notes and ns.Notes.ClosePending then ns.Notes:ClosePending(id) end
 	local it = remove(id)
 	if not it then return end
 	if (it.fights or 0) > 0 and ns.Fights then ns.Fights:Remember({ key = it.key }) end
 	ns.Fire("PENDING_CHANGED")
-	if not quiet and ns.Toast then
+	if not quiet then
 		local snap = ns.CopyTable(it)
-		ns.Toast:Undo(string.format(ns.L["Skipped %s."], ns.FullName(it.name, it.surname)), function()
+		pushRecent(string.format(L["Skipped %s."], ns.FullName(it.name, it.surname)), "skipped", function()
 			Pending:Restore({ snap })
 		end)
+		ns.Fire("PENDING_CHANGED")
 	end
 	return it
 end
 
 function Pending:AddAll()
-	local n = 0
+	local n, undos = 0, {}
 	for _, it in ipairs(self:List()) do
-		if self:Add(it.id, true) then n = n + 1 end
+		local entry, undo = self:Add(it.id, true)
+		if entry then
+			n = n + 1
+			undos[#undos + 1] = undo
+		end
 	end
-	if n > 0 then ns.Print(string.format(L["Players added to the list: %d"], n)) end
+	if n > 0 then
+		ns.Print(string.format(L["Players added to the list: %d"], n))
+		pushRecent(string.format(L["Added %d players."], n), "added", function()
+			for i = #undos, 1, -1 do undos[i]() end
+		end)
+		ns.Fire("PENDING_CHANGED")
+	end
 	return n
 end
 
@@ -267,10 +356,11 @@ function Pending:SkipAll()
 		local gone = self:Skip(it.id, true)
 		if gone then snaps[#snaps + 1] = ns.CopyTable(gone) end
 	end
-	if #snaps > 0 and ns.Toast then
-		ns.Toast:Undo(string.format(ns.L["Skipped %d players."], #snaps), function()
+	if #snaps > 0 then
+		pushRecent(string.format(L["Skipped %d players."], #snaps), "skipped", function()
 			Pending:Restore(snaps)
 		end)
+		ns.Fire("PENDING_CHANGED")
 	end
 end
 

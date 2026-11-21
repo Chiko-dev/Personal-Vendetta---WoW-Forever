@@ -311,30 +311,13 @@ local function showImport(session, records)
 	end
 
 	if not importFrame then
-		importFrame = CreateFrame("Frame", "PersonalVendettaImport", UIParent, "BackdropTemplate")
-		importFrame:SetSize(380, 210)
+		importFrame = ns.Skin.Window("PersonalVendettaImport", 400, 220, L["Shared hit list"], ns.ICON)
 		importFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 160)
-		importFrame:SetFrameStrata("DIALOG")
-		importFrame:SetMovable(true)
-		importFrame:EnableMouse(true)
-		importFrame:RegisterForDrag("LeftButton")
-		importFrame:SetScript("OnDragStart", importFrame.StartMoving)
-		importFrame:SetScript("OnDragStop", importFrame.StopMovingOrSizing)
-		importFrame:SetClampedToScreen(true)
-		if importFrame.SetBackdrop then
-			importFrame:SetBackdrop({
-				bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-				tile = true, tileSize = 32, edgeSize = 24,
-				insets = { left = 6, right = 6, top = 6, bottom = 6 },
-			})
-		end
-		importFrame.title = importFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-		importFrame.title:SetPoint("TOP", 0, -16)
-		importFrame.title:SetText("|cff9933ff" .. L["Shared hit list"] .. "|r")
+		local tc = ns.Skin.Child(importFrame, "TitleContainer")
+		importFrame.title = ns.Skin.Child(tc, "TitleText") or importFrame.fallbackTitle
 		importFrame.body = importFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-		importFrame.body:SetPoint("TOPLEFT", 20, -44)
-		importFrame.body:SetPoint("TOPRIGHT", -20, -44)
+		importFrame.body:SetPoint("TOPLEFT", 66, -34)
+		importFrame.body:SetPoint("TOPRIGHT", -20, -34)
 		importFrame.body:SetJustifyH("LEFT")
 		importFrame.body:SetWordWrap(true)
 		importFrame.names = importFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -342,11 +325,9 @@ local function showImport(session, records)
 		importFrame.names:SetPoint("TOPRIGHT", importFrame.body, "BOTTOMRIGHT", 0, -8)
 		importFrame.names:SetJustifyH("LEFT")
 		importFrame.names:SetWordWrap(true)
-		importFrame.yes = CreateFrame("Button", nil, importFrame, "UIPanelButtonTemplate")
-		importFrame.yes:SetSize(150, 22)
+		importFrame.yes = ns.Skin.Button(importFrame, "", 150, 22)
 		importFrame.yes:SetPoint("BOTTOMLEFT", 20, 18)
-		importFrame.no = CreateFrame("Button", nil, importFrame, "UIPanelButtonTemplate")
-		importFrame.no:SetSize(110, 22)
+		importFrame.no = ns.Skin.Button(importFrame, "", 110, 22)
 		importFrame.no:SetPoint("BOTTOMRIGHT", -20, 18)
 		importFrame.no:SetText(L["No thanks"])
 		importFrame.no:SetScript("OnClick", function() importFrame:Hide() end)
@@ -481,7 +462,41 @@ end
 
 ns.On("SIGHTED", function(entries)
 	for i = 1, math.min(#entries, 3) do Share:SendSighting(entries[i]) end
+	for _, e in ipairs(entries) do
+		if e.scum then Share:WarnGroup(e) end
+	end
 end)
+
+-- ===========================================================================
+-- Warning everyone else, addon or not
+-- ===========================================================================
+
+local function sendChat(msg, chatType)
+	local fn = (C_ChatInfo and C_ChatInfo.SendChatMessage) or _G.SendChatMessage
+	if not fn then return false end
+	return (pcall(fn, msg, chatType))
+end
+
+function Share:ScumWarning(entry)
+	return string.format(L["{rt8} %s is nearby! Kills allies dishonourably. {rt8}"], ns.FullName(entry))
+end
+
+-- One click: yell it to everyone around you. The game only lets an addon
+-- say or yell in the open world from a click or a key press, which is why
+-- this is a button rather than automatic.
+function Share:WarnAround(entry)
+	if not entry then return false end
+	return sendChat(self:ScumWarning(entry), "YELL")
+end
+
+-- Automatic: party or raid chat is allowed without a click.
+function Share:WarnGroup(entry)
+	if not ns.db.settings.scumWarnParty then return false end
+	if ns.InQuietPlace() or not ns.InTrackedZone() then return false end
+	local ch = channel()
+	if not ch then return false end
+	return sendChat(self:ScumWarning(entry), ch)
+end
 
 -- ===========================================================================
 -- Events

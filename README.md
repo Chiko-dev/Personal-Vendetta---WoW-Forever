@@ -20,12 +20,19 @@ A hitman list for **World of Warcraft: Forever**. When an enemy player kills you
 - **A skull over their head.** Listed players get a skull above their nameplate; scum get a pulsing red one.
 - **No horn spam.** Each player sounds once when they come into range. If they step out and back in, they have to be gone 30 seconds before they sound again, and that timer is per player. You can also keep it quiet in capital cities, and in neutral towns like Gadgetzan and inns: the window still shows who's there, without the horn or chat line.
 - **Party alerts.** When you spot someone from your list, groupmates running the addon get a chat line (and a horn, if that player is on their list too).
+- **Warn everyone about scum.** Scum in the floating window get a **Warn** button: one click yells their name to everyone around you, addon or not. Scum sightings are also posted in party or raid chat. (The game only lets addons say or yell from a click, so the yell can't be automatic.)
 - **Settle the score.** Draw level with someone who was ahead and you get a "Vendetta settled" banner and fanfare. Kill streaks of 3, 5 and 10 get one too.
 - **Player detail.** Click a name in the hit list for everything known about them: score and standing, when you first met, where you last saw them, the levels they've been seen at, and a dated history of kills and deaths.
-- **Undo.** Skip, Skip all and Remove show an Undo button for 10 seconds.
+- **Undo, in place.** After Add, Skip, Add all or Skip all, the row stays for 10 seconds with **Undo** where Add was. Remove on a player's card turns into Undo the same way, and `/vendetta undo` brings back the last one removed by command.
 - **One list for all your characters** (optional). Turning it on merges this character's list in, adding scores together for anyone on both.
-- **Radar dot.** The dot in the window's corner is green when the radar can see and red when enemy nameplates are off; click it to switch them on or off.
-- **Settings from the minimap skull.** Left-click opens settings, right-click shows or hides the window, drag to move it. Tabs for General, Window (lock, size, background opacity, auto-hide when quiet), Alerts (separate horns and volumes for normal and scum sightings) and Hit list (search by name, class, race, zone or note, and a sort dropdown: newest, deaths, kills, scum, last seen or name).
+- **Radar dot.** The dot in the window's corner is green when the radar is watching. It turns red when enemy nameplates are off, or while you're in a city or town you chose to keep quiet, and goes green again when you leave. Click it to switch nameplates on or off.
+- **A real history.** Every entry records where it happened (zone and map coordinates) and how: killed you 1v1 or in a gank, with which spell and whether it was the killing blow; you won the fight; or you both walked away and it isn't settled.
+- **One window, Forever style.** The minimap skull opens a window built like the game's own Legacy Challenges and Professions frames, with three tabs down its right edge:
+  - **Hit list:** gold collapsible headers (Near you now, Scum, Seen this week, Everyone else), search, and a Filter dropdown to sort. Pick a name to see their cards on the right: score, standing, last seen, level progression, history, note, Scum and Remove.
+  - **To add:** everyone waiting, as cards with Scum, Note, Skip and Add.
+  - **Settings:** General, Window (lock, size, background opacity, auto-hide when quiet) and Alerts (separate horns and volumes for normal and scum sightings).
+  
+  A bar across the top counts how many vendettas you've settled. Right-click the skull to show or hide the floating window, drag it to move the button.
 - **In your language.** English, German, French, Spanish (incl. Mexican) and Russian.
 - **Ignores arenas and battlegrounds.** Duels never count, since a duel doesn't kill you.
 

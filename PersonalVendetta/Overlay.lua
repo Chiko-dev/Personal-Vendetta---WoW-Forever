@@ -24,6 +24,7 @@ local ADD_ROW_HEIGHT = 34
 local FOOTER_HEIGHT = 28
 
 local frame, rows, addRows
+local lastRemoved -- for /vendetta undo
 local tabs = {}
 local addPage
 local currentTab = "near"
@@ -132,20 +133,10 @@ local function solidTexture(parent, layer, r, g, b, a)
 	return t
 end
 
--- A compact flat button that needs no template, sized for this window.
+-- A compact button in the Forever list art, sized for this window. A tint
+-- tells Add (green) and Skip (grey) apart at a glance.
 local function flatButton(parent, label, w, h, r, g, b)
-	local btn = CreateFrame("Button", nil, parent)
-	btn:SetSize(w, h or 18)
-	btn.bg = solidTexture(btn, "BACKGROUND", r or 0.25, g or 0.18, b or 0.32, 0.9)
-	btn.bg:SetAllPoints()
-	local hl = solidTexture(btn, "HIGHLIGHT", 1, 1, 1, 0.15)
-	hl:SetAllPoints()
-	btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	btn.text:SetPoint("CENTER", 0, 0)
-	btn.text:SetText(label)
-	btn.SetLabel = function(self, t) self.text:SetText(t) end
-	btn.GetLabel = function(self) return self.text:GetText() end
-	return btn
+	return ns.Skin.FlatButton(parent, label, w, h or 18, r and { r * 1.6 + 0.3, g * 1.6 + 0.3, b * 1.6 + 0.3 } or nil)
 end
 
 -- ===========================================================================
@@ -228,6 +219,22 @@ local function buildRow(index, parent, anchor)
 		GameTooltip:Show()
 	end)
 	row.note:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
+	-- Scum only: one click yells a warning to everyone around you.
+	row.warn = flatButton(row, "|cffff5555" .. L["Warn"] .. "|r", 40, 16, 0.5, 0.1, 0.1)
+	row.warn:SetPoint("RIGHT", row.note, "LEFT", -3, 0)
+	row.warn:SetScript("OnClick", function()
+		if row.entry and ns.Share then ns.Share:WarnAround(row.entry) end
+	end)
+	row.warn:SetScript("OnEnter", function(self)
+		if not GameTooltip then return end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine(L["Warn everyone around you"])
+		if row.entry and ns.Share then GameTooltip:AddLine(ns.Share:ScumWarning(row.entry), 1, 1, 1, true) end
+		GameTooltip:Show()
+	end)
+	row.warn:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+	row.warn:Hide()
 
 	row.score = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	row.score:SetPoint("RIGHT", row.note, "LEFT", -6, 0)
@@ -316,7 +323,8 @@ local function buildAddRow(index, parent)
 		if row.id then ns.Pending:Skip(row.id) end
 	end)
 	row.add:SetScript("OnClick", function()
-		if row.id then ns.Pending:Add(row.id) end
+		if row.rid then ns.Pending:Undo(row.rid)
+		elseif row.id then ns.Pending:Add(row.id) end
 	end)
 
 	row:EnableMouse(true)
@@ -359,16 +367,22 @@ end
 local function buildTab(key, label)
 	local tab = CreateFrame("Button", nil, frame)
 	tab:SetSize(key == "add" and 86 or 74, HEADER_HEIGHT - 6)
-	tab.bg = solidTexture(tab, "BACKGROUND", 0.35, 0.2, 0.5, 0.35)
+	tab.bg = tab:CreateTexture(nil, "BACKGROUND")
 	tab.bg:SetAllPoints()
+	ns.Skin.Atlas(tab.bg, "Legacy-Challenge-Left-Sub-Tab", false, { 0.2, 0.14, 0.09, 0.9 })
 	tab.glow = solidTexture(tab, "BORDER", 1, 0.75, 0.15, 1)
 	tab.glow:SetAllPoints()
 	if tab.glow.SetBlendMode then tab.glow:SetBlendMode("ADD") end
 	tab.glow:SetAlpha(0)
-	tab.line = solidTexture(tab, "ARTWORK", 0.75, 0.45, 1, 1)
-	tab.line:SetPoint("BOTTOMLEFT", 0, 0)
-	tab.line:SetPoint("BOTTOMRIGHT", 0, 0)
-	tab.line:SetHeight(2)
+	tab.line = tab:CreateTexture(nil, "ARTWORK")
+	if ns.Skin.Atlas(tab.line, "Legacy-Challenge-Left-Sub-Tab-selected", false) then
+		tab.line:SetAllPoints()
+	else
+		ns.Skin.Color(tab.line, { 1, 0.82, 0, 1 })
+		tab.line:SetPoint("BOTTOMLEFT", 0, 0)
+		tab.line:SetPoint("BOTTOMRIGHT", 0, 0)
+		tab.line:SetHeight(2)
+	end
 	local hl = solidTexture(tab, "HIGHLIGHT", 1, 1, 1, 0.12)
 	hl:SetAllPoints()
 	tab.text = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -399,15 +413,8 @@ local function buildFrame()
 	end)
 	frame:SetClampedToScreen(true)
 
-	if frame.SetBackdrop then
-		frame:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\Buttons\\WHITE8X8",
-			edgeSize = 1,
-		})
-		frame:SetBackdropColor(0, 0, 0, 0.55)
-		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
-	end
+	-- Forever's thin tooltip border: it scales down to a single title bar.
+	ns.Skin.Panel(frame, "TooltipDefaultLayout", 0.55)
 
 	-- Radar status: green when enemy nameplates are on and the radar can see,
 	-- red when it is blind. Click to switch them on or off.
@@ -425,7 +432,10 @@ local function buildFrame()
 	dot:SetScript("OnEnter", function(self)
 		if not GameTooltip then return end
 		GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-		if ns.Radar and ns.Radar:NameplatesOn() then
+		if self.muted then
+			GameTooltip:AddLine("|cffff4444" .. L["Alerts muted here"] .. "|r")
+			GameTooltip:AddLine(L["You're somewhere you chose to keep quiet (Settings > Alerts). The radar turns back on when you leave."], 1, 1, 1, true)
+		elseif ns.Radar and ns.Radar:NameplatesOn() then
 			GameTooltip:AddLine("|cff44ff44" .. L["Radar on"] .. "|r")
 			GameTooltip:AddLine(string.format(L["Watching up to %s yards around you."], ns.Radar:GetRange()), 1, 1, 1, true)
 			GameTooltip:AddLine(L["Click to switch enemy nameplates off."], 0.7, 0.7, 0.7, true)
@@ -514,6 +524,10 @@ local function renderNear()
 			row.score:SetText(string.format("|cffff6666%d|r/|cff66ff66%d|r",
 				entry.theyKilledMe or 0, entry.iKilledThem or 0))
 			row.note:SetLabel(entry.note and ("|cffffd100" .. L["Note"] .. "|r") or ("|cffaaaaaa+" .. L["Note"] .. "|r"))
+			local warn = entry.scum and not record.dead and ns.db.settings.scumWarnButton ~= false
+			row.warn:SetShown(warn and true or false)
+			row.score:ClearAllPoints()
+			row.score:SetPoint("RIGHT", warn and row.warn or row.note, "LEFT", -6, 0)
 			row.entry = entry
 			row:Show()
 
@@ -539,9 +553,13 @@ local function hideNear()
 end
 
 local function renderAdd()
-	local list = ns.Pending and ns.Pending:List() or {}
-	local total = #list
-	local maxOffset = math.max(0, total - ADD_ROWS)
+	local pending = ns.Pending and ns.Pending:List() or {}
+	-- Just added or skipped: their row stays a moment, with Undo where Add was.
+	local list = {}
+	for _, r in ipairs(ns.Pending and ns.Pending:Recent() or {}) do list[#list + 1] = { recent = r } end
+	for _, it in ipairs(pending) do list[#list + 1] = it end
+	local total = #pending
+	local maxOffset = math.max(0, #list - ADD_ROWS)
 	if addOffset > maxOffset then addOffset = maxOffset end
 	if addOffset < 0 then addOffset = 0 end
 
@@ -549,8 +567,30 @@ local function renderAdd()
 	for i = 1, ADD_ROWS do
 		local row = addRows[i]
 		local it = list[addOffset + i]
-		if it then
+		if it and it.recent then
 			shown = shown + 1
+			local r = it.recent
+			row.name:SetText(r.label)
+			if r.kind == "added" then row.name:SetTextColor(0.5, 0.9, 0.5) else row.name:SetTextColor(0.6, 0.6, 0.6) end
+			row.detail:SetText("|cff888888" .. L["Changed your mind?"] .. "|r")
+			row.scum:Hide()
+			row.scumText:Hide()
+			row.note:Hide()
+			row.skip:Hide()
+			row.add:SetLabel(L["Undo"])
+			row.add:SetWidth(math.max(34, (row.add.text:GetStringWidth() or 0) + 14))
+			row.id, row.item, row.rid = nil, nil, r.rid
+			stopEffects(row)
+			row:Show()
+		elseif it then
+			shown = shown + 1
+			row.scum:Show()
+			row.scumText:Show()
+			row.note:Show()
+			row.skip:Show()
+			row.add:SetLabel(L["Add"])
+			row.add:SetWidth(34)
+			row.rid = nil
 			local r, g, b = ns.ClassColor(it.class)
 			local lvl = it.levelSkull and "|cffff3333??|r " or (it.level and ("|cffffffff" .. it.level .. "|r ") or "")
 			row.name:SetText((it.scum and (ns.SKULL .. " ") or "") .. lvl .. ns.FullName(it.name, it.surname))
@@ -568,27 +608,27 @@ local function renderAdd()
 				startFlash(row)
 			end
 		else
-			row.id, row.item = nil, nil
+			row.id, row.item, row.rid = nil, nil, nil
 			stopEffects(row)
 			row:Hide()
 		end
 	end
 
-	addPage.empty:SetShown(total == 0)
+	addPage.empty:SetShown(#list == 0)
 	addPage.addAll:SetShown(total > 0)
 	addPage.skipAll:SetShown(total > 0)
 	addPage.info:SetShown(total > 0)
 
-	local bodyHeight = (total == 0) and 34 or (shown * ADD_ROW_HEIGHT)
+	local bodyHeight = (#list == 0) and 34 or (shown * ADD_ROW_HEIGHT)
 	addPage.addAll:ClearAllPoints()
 	addPage.skipAll:ClearAllPoints()
 	addPage.info:ClearAllPoints()
 	addPage.addAll:SetPoint("TOPRIGHT", addPage, "TOPRIGHT", -1, -(bodyHeight + 4))
 	addPage.skipAll:SetPoint("RIGHT", addPage.addAll, "LEFT", -4, 0)
 	addPage.info:SetPoint("LEFT", addPage, "TOPLEFT", 2, -(bodyHeight + 14))
-	if total > ADD_ROWS then
+	if #list > ADD_ROWS then
 		addPage.info:SetText(string.format(L["%d-%d of %d, scroll for more"],
-			addOffset + 1, math.min(total, addOffset + ADD_ROWS), total))
+			addOffset + 1, math.min(#list, addOffset + ADD_ROWS), #list))
 	else
 		addPage.info:SetText(string.format(L["%d waiting"], total))
 	end
@@ -627,20 +667,24 @@ refresh = function()
 	if count > 0 then
 		frame.title:SetText("|cff9933ffVendetta|r  |cffff4444" .. string.format(L["%d near"], count) .. "|r"
 			.. (scumNear > 0 and ("  " .. ns.SKULL .. ns.SCUM_COLOR .. string.format(L["%d scum"], scumNear) .. "|r") or ""))
-		frame:SetBackdropBorderColor(0.9, 0.2, 0.2, 0.95)
+		frame:SetBorderTint(1, 0.25, 0.2, 1)
 	else
 		frame.title:SetText("|cff9933ffVendetta|r  |cff888888" .. string.format(L["%d on list"], total) .. "|r")
-		frame:SetBackdropBorderColor(0.4, 0.2, 0.6, 0.9)
+		frame:SetBorderTint(1, 1, 1, 1)
 	end
-	if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, frame.bgAlpha or 0.55) end
+	frame:SetCenterTint(0.06, 0.045, 0.03, frame.bgAlpha or 0.55)
 
+	-- Red when the radar is blind, and also in a city or town you chose to
+	-- keep quiet: it is not alerting you there. Green again once you leave.
 	local seeing = ns.Radar and ns.Radar:NameplatesOn()
-	if seeing then
+	local muted = seeing and ns.InQuietPlace() or false
+	if seeing and not muted then
 		frame.dot.tex:SetColorTexture(0.2, 0.9, 0.2, 1)
 	else
 		frame.dot.tex:SetColorTexture(1, 0.15, 0.15, 1)
 	end
 	frame.dot.blind = not seeing
+	frame.dot.muted = muted
 
 	tabs.near.text:SetText(count > 0 and (L["Nearby"] .. " |cffff4444" .. count .. "|r") or L["Nearby"])
 	tabs.add.text:SetText(pendingCount > 0 and (L["To add"] .. " |cffffd100" .. pendingCount .. "|r") or L["To add"])
@@ -839,9 +883,16 @@ local function handleCommand(msg)
 		end
 		local full = ns.FullName(entry)
 		local snapshot = ns.List:RemoveKey(entry.key)
-		ns.Print(string.format(L["Removed %s. Generous of you."], full))
-		if snapshot and ns.Toast then
-			ns.Toast:Undo(string.format(L["Removed %s."], full), function() ns.List:Restore(snapshot) end)
+		ns.Print(string.format(L["Removed %s. Generous of you."], full) .. " " .. L["Changed your mind? /vendetta undo"])
+		lastRemoved = snapshot
+	elseif cmd == "undo" then
+		local snap = lastRemoved
+		lastRemoved = nil
+		local back = snap and ns.List:Restore(snap)
+		if back then
+			ns.Print(string.format(L["%s is back on the list."], ns.FullName(back)))
+		else
+			ns.Print(L["Nothing to undo."])
 		end
 	elseif cmd == "detail" or cmd == "details" or cmd == "info" then
 		local _, entry, count = ns.List:Find(nil, arg)
@@ -903,7 +954,7 @@ local function handleCommand(msg)
 		ns.Print(s.enabled and L["Sighting sounds on."] or L["Sighting sounds off."])
 		ns.Fire("SETTINGS_CHANGED")
 	elseif cmd == "options" or cmd == "config" or cmd == "settings" then
-		ns.Settings:Toggle()
+		ns.Settings:Open("general")
 	elseif cmd == "nameplates" or cmd == "np" then
 		ns.Radar:EnableNameplates()
 	elseif cmd == "scum" or cmd == "unscum" then
@@ -955,6 +1006,7 @@ local function handleCommand(msg)
 		print("  |cffffd100/vendetta add|r  " .. L["add your current target"])
 		print("  |cffffd100/vendetta add <first> <surname>|r  " .. L["add someone by name"])
 		print("  |cffffd100/vendetta remove <name>|r  " .. L["take someone off"])
+		print("  |cffffd100/vendetta undo|r  " .. L["bring back the last one you removed"])
 		print("  |cffffd100/vendetta note <name>|r  " .. L["write a note on someone"])
 		print("  |cffffd100/vendetta share|r  " .. L["share your list with your party"])
 		print("  |cffffd100/vendetta recap|r  " .. L["re-read your last death"])
@@ -988,6 +1040,7 @@ ns.On("LIST_CHANGED", function() refresh() end)
 ns.On("RADAR_CHANGED", function() refresh() end)
 ns.On("SIGHTED", alert)
 ns.On("SETTINGS_CHANGED", function() refresh() end)
+ns.On("QUIET_CHANGED", function() refresh() end)
 ns.On("PENDING_CHANGED", function(added)
 	if type(added) == "table" then
 		for _, it in ipairs(added) do newPending[it.id] = true end

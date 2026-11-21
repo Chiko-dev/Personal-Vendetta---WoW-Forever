@@ -123,6 +123,7 @@ local function handleKillers(killers)
 	local db = ns.db
 	local fresh, repeats = {}, {}
 
+	for _, k in ipairs(killers) do k.n = #killers end
 	for _, k in ipairs(killers) do
 		local key, entry = ns.List:Find(k.guid, k.name, k.surname)
 		if entry then

@@ -114,60 +114,24 @@ local function save()
 end
 
 local function button(parent, label, w, h)
-	local ok, b = pcall(CreateFrame, "Button", nil, parent, "UIPanelButtonTemplate")
-	if not ok or not b then
-		b = CreateFrame("Button", nil, parent)
-		b:SetNormalFontObject("GameFontNormalSmall")
-		b:SetHighlightFontObject("GameFontHighlightSmall")
-	end
-	b:SetSize(w, h or 22)
-	b:SetText(label)
-	return b
+	return ns.Skin.Button(parent, label, w, h or 22, (h or 22) < 22)
 end
 
 local function build()
-	frame = CreateFrame("Frame", "PersonalVendettaNotes", UIParent, "BackdropTemplate")
-	frame:SetSize(WIDTH, 300)
+	frame = ns.Skin.Window("PersonalVendettaNotes", WIDTH, 300, L["Note"], ns.ICON)
 	frame:SetFrameStrata("FULLSCREEN_DIALOG")
-	frame:SetMovable(true)
-	frame:EnableMouse(true)
-	frame:RegisterForDrag("LeftButton")
-	frame:SetScript("OnDragStart", frame.StartMoving)
-	frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-	frame:SetClampedToScreen(true)
-	frame:Hide()
-
-	if frame.SetBackdrop then
-		frame:SetBackdrop({
-			bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-			tile = true, tileSize = 32, edgeSize = 24,
-			insets = { left = 6, right = 6, top = 6, bottom = 6 },
-		})
-	end
-	if type(UISpecialFrames) == "table" then
-		table.insert(UISpecialFrames, "PersonalVendettaNotes")
-	end
 
 	titleText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	titleText:SetPoint("TOPLEFT", 22, -18)
-	titleText:SetPoint("TOPRIGHT", -22, -18)
+	titleText:SetPoint("TOPLEFT", 66, -32)
+	titleText:SetPoint("TOPRIGHT", -22, -32)
 	titleText:SetJustifyH("LEFT")
 	titleText:SetWordWrap(false)
 
 	-- Text box with its own border.
 	local box = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	box:SetSize(EDIT_W + 12, EDIT_H + 12)
-	box:SetPoint("TOPLEFT", 20, -46)
-	if box.SetBackdrop then
-		box:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\Buttons\\WHITE8X8",
-			edgeSize = 1,
-		})
-		box:SetBackdropColor(0, 0, 0, 0.6)
-		box:SetBackdropBorderColor(0.5, 0.35, 0.7, 0.9)
-	end
+	box:SetPoint("TOPLEFT", 20, -66)
+	ns.Skin.Panel(box, "TooltipDefaultLayout", 0.75)
 
 	edit = CreateFrame("EditBox", nil, box)
 	edit:SetMultiLine(true)
@@ -227,22 +191,20 @@ local function build()
 	frame.saveButton, frame.clearButton = saveB, clearB
 
 	-- Height: header + box + label + preset rows + buttons.
-	frame:SetHeight(46 + EDIT_H + 12 + 40 + (lastRowBottom or 0) + 20 + 56)
+	frame:SetHeight(66 + EDIT_H + 12 + 40 + (lastRowBottom or 0) + 20 + 56)
 	frame:SetScript("OnHide", function() editingKey, onSave = nil, nil ; edit:ClearFocus() end)
 	return frame
 end
 
--- Beside the window it was opened from: the settings panel, or the
--- floating window (on whichever side has room), else mid-screen.
+-- Beside the window it was opened from: over the main window's player
+-- pane, or by the floating window (on whichever side has room), else
+-- mid-screen.
 local function place()
 	frame:ClearAllPoints()
-	local settings = _G.PersonalVendettaSettings
+	local main = _G.PersonalVendettaMain
 	local overlay = _G.PersonalVendettaOverlay
-	local detail = _G.PersonalVendettaDetail
-	if detail and detail:IsShown() then
-		frame:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, -4)
-	elseif settings and settings:IsShown() then
-		frame:SetPoint("TOPLEFT", settings, "TOPRIGHT", 4, 0)
+	if main and main:IsShown() then
+		frame:SetPoint("BOTTOMRIGHT", main, "BOTTOMRIGHT", -16, 40)
 	elseif overlay and overlay:IsShown() then
 		local right = overlay.GetRight and overlay:GetRight()
 		local screen = UIParent.GetWidth and UIParent:GetWidth()

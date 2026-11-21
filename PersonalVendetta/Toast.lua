@@ -37,19 +37,11 @@ local function build()
 	frame = CreateFrame("Frame", "PersonalVendettaToast", UIParent, "BackdropTemplate")
 	frame:SetSize(360, 54)
 	frame:SetPoint("TOP", UIParent, "TOP", 0, -150)
-	frame:SetFrameStrata("HIGH")
+	frame:SetFrameStrata("FULLSCREEN_DIALOG")
 	frame:EnableMouse(false) -- clicks go straight through, except on the button
 	frame:Hide()
 
-	if frame.SetBackdrop then
-		frame:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\Buttons\\WHITE8X8",
-			edgeSize = 1,
-		})
-		frame:SetBackdropColor(0.04, 0.02, 0.07, 0.92)
-		frame:SetBackdropBorderColor(0.45, 0.25, 0.7, 1)
-	end
+	ns.Skin.Panel(frame, "TooltipDefaultLayout", 0.94)
 
 	frame.accent = solid(frame, "ARTWORK", 0.6, 0.2, 1, 1)
 	frame.accent:SetPoint("TOPLEFT", 1, -1)
@@ -78,11 +70,12 @@ local function build()
 	local b = CreateFrame("Button", nil, frame)
 	b:SetSize(70, 24)
 	b:SetPoint("RIGHT", -10, 0)
-	b.bg = solid(b, "BACKGROUND", 0.3, 0.18, 0.45, 1)
+	b.bg = b:CreateTexture(nil, "BACKGROUND")
 	b.bg:SetAllPoints()
+	ns.Skin.Atlas(b.bg, "Legacy-Challenge-Left-Sub-Tab", false, { 0.3, 0.18, 0.12, 1 })
 	local hl = solid(b, "HIGHLIGHT", 1, 1, 1, 0.18)
 	hl:SetAllPoints()
-	b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	b.text:SetPoint("CENTER")
 	frame.button = b
 

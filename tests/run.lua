@@ -498,9 +498,9 @@ H.missingKits[316723] = nil
 section("Settings panel and minimap button")
 local okSettings, errSettings = pcall(function() ns.Settings:Toggle(true) end)
 check("settings panel builds", okSettings, errSettings)
-check("settings panel shown", _G.PersonalVendettaSettings and _G.PersonalVendettaSettings:IsShown())
+check("settings panel shown", _G.PersonalVendettaMain and _G.PersonalVendettaMain:IsShown())
 check("escape closes it", (function()
-	for _, n in ipairs(UISpecialFrames) do if n == "PersonalVendettaSettings" then return true end end
+	for _, n in ipairs(UISpecialFrames) do if n == "PersonalVendettaMain" then return true end end
 	return false
 end)())
 check("minimap button built on load", _G.PersonalVendettaMinimapButton ~= nil)
@@ -512,9 +512,9 @@ _G.PersonalVendettaMinimapButton:Click("RightButton")
 check("right-click toggles the window", ns.db.settings.overlayShown == not wasShown)
 _G.PersonalVendettaMinimapButton:Click("RightButton")
 check("and back", ns.db.settings.overlayShown == wasShown)
-_G.PersonalVendettaSettings:Hide()
+_G.PersonalVendettaMain:Hide()
 _G.PersonalVendettaMinimapButton:Click("LeftButton")
-check("left-click opens settings", _G.PersonalVendettaSettings:IsShown())
+check("left-click opens settings", _G.PersonalVendettaMain:IsShown())
 
 check("compartment handler is global", type(PersonalVendetta_OnAddonCompartmentClick) == "function")
 
@@ -563,7 +563,14 @@ check("/vendetta options runs", (pcall(SlashCmdList.PERSONALVENDETTA, "options")
 local function clearQueue()
 	local q = ns.db.pending or {}
 	for i = #q, 1, -1 do q[i] = nil end
+	ns.Pending:ClearRecent()
 	ns.Fire("PENDING_CHANGED")
+end
+-- A row (floating window) or card (main window) offering Undo.
+local function undoRowFor(text)
+	for _, f in ipairs(H.frames) do
+		if f.rid and f.add and f:IsShown() and f.name and (f.name:GetText() or ""):find(text, 1, true) then return f end
+	end
 end
 local function queueText()
 	local out = {}
@@ -740,23 +747,27 @@ ns.Settings:Open("general")
 check("opens on General", ns.Settings.current == "general")
 ns.Settings:Open("list")
 check("Hit list tab opens", ns.Settings.current == "list")
--- The list tab's rows: find one showing Gankmaster and tick it.
+-- The hit list's rows: find Gankmaster, pick him, tick Scum on his card.
 local function listRowFor(name)
 	for _, f in ipairs(H.frames) do
-		if f.scum and f.tint and f.name and (f.name:GetText() or ""):find(name, 1, true) then return f end
+		if f.key and f.entry and f.score and f.name and f:IsShown()
+			and (f.name:GetText() or ""):find(name, 1, true) then return f end
 	end
 end
 local lr = listRowFor("Gankmaster")
 check("Gankmaster listed", lr ~= nil)
-if lr then
-	lr.scum:SetChecked(true)
-	lr.scum:Click()
-end
-check("ticking Scum in the list marks him", gank.scum == true)
-if lr then
-	lr.scum:SetChecked(false)
-	lr.scum:Click()
-end
+if lr then lr:GetScript("OnClick")(lr) end
+check("clicking his row shows his card", ns.Detail:Key() == gank.key)
+local dScum = ns.Detail:_frame().scum
+dScum:SetChecked(true)
+dScum:Click()
+check("ticking Scum on his card marks him", gank.scum == true)
+check("he moves under the Scum header", (function()
+	local r = listRowFor("Gankmaster")
+	return r ~= nil and r.name:GetText():find(ns.SKULL, 1, true) ~= nil
+end)())
+dScum:SetChecked(false)
+dScum:Click()
 check("unticking clears it", not gank.scum)
 
 -- Nameplate checkbox in the panel drives the CVars.
@@ -787,7 +798,7 @@ check("old sound checkbox wording gone", checkboxLabelled("Play a sound when") =
 -- ---------------------------------------------------------------------------
 section("Icon and release metadata")
 local toc = assert(io.open(ADDON_DIR .. "PersonalVendetta.toc")):read("*a")
-check("toc version 2.0", toc:find("## Version: 2.0", 1, true) ~= nil)
+check("toc version 3.0", toc:find("## Version: 3.0", 1, true) ~= nil)
 check("toc icon points at our file", toc:find("Media\\icon", 1, true) ~= nil)
 local ih = io.open(ADDON_DIR .. "Media/icon.tga", "rb")
 check("icon.tga shipped", ih ~= nil)
@@ -1035,26 +1046,21 @@ end
 check("sorted newest first", sorted)
 check("newest on top is the last one added", byDate[1] == tgt, byDate[1] and ns.FullName(byDate[1]))
 ns.Settings:Open("list")
-local function listRowAt(n)
-	local rowsFound = {}
-	for _, f in ipairs(H.frames) do
-		if f.scum and f.tint and f.seen and f:IsShown() then rowsFound[#rowsFound + 1] = f end
-	end
-	return rowsFound[n]
-end
-local top = listRowAt(1)
-check("top row of the tab is the newest", top and top.entry == tgt)
+check("newest first in the list order", ns.Settings:VisibleEntries()[1] == tgt)
+ns.Main:Select(tgt.key)
+local dpane = ns.Detail:_frame()
 tgt.lastSeen = time() - 3 * 3600 - 60
 ns.Settings:Refresh()
-check("last seen shown as hours", top and (top.seen:GetText() or "") == "3 hours ago", top and top.seen:GetText())
+check("last seen shown as hours", (dpane.facts:GetText() or ""):find("3 hours ago", 1, true) ~= nil, dpane.facts:GetText())
 tgt.lastSeen = time() - 2 * 86400 - 60
 ns.Settings:Refresh()
-check("then as days", top and (top.seen:GetText() or "") == "2 days ago", top and top.seen:GetText())
+check("then as days", (dpane.facts:GetText() or ""):find("2 days ago", 1, true) ~= nil, dpane.facts:GetText())
 
 -- ---------------------------------------------------------------------------
 section("Notes")
-check("note button on the row", top and top.note ~= nil)
-check("empty note reads + Note", top and (top.note:GetText() or ""):find("+ Note", 1, true) ~= nil)
+local top = { note = dpane.editNote }
+check("note button on the card", top.note ~= nil)
+check("empty note reads Add note", (top.note:GetText() or "") == "Add note", top.note:GetText())
 top.note:Click()
 check("editor opens for that player", ns.Notes:IsOpen() and ns.Notes:EditingKey() == tgt.key)
 ns.Notes:Append("Ganked while leveling")
@@ -1065,8 +1071,7 @@ check("presets append once, comma separated", ns.Notes:_edit():GetText() == "Gan
 ns.Notes:Save()
 check("saved to the player", tgt.note == "Ganked while leveling, 2v1", tgt.note)
 check("editor closed on save", not ns.Notes:IsOpen())
-check("button shows a note exists", (top.note:GetText() or ""):find("Note", 1, true) ~= nil and
-	(top.note:GetText() or ""):find("+", 1, true) == nil)
+check("button shows a note exists", (top.note:GetText() or "") == "Edit note", top.note:GetText())
 ns.Notes:Open(tgt.key)
 ns.Notes:_edit():SetText("something else")
 _G.PersonalVendettaNotes:Hide()
@@ -1333,7 +1338,12 @@ ns.Overlay.SelectTab("add")
 page.skipAll:Click()
 check("Skip all clears the queue", ns.Pending:Count() == 0)
 check("skipped players not added", select(2, ns.List:Find("Player-4710-0000DLT1")) == nil)
-check("empty message shown", page.empty:IsShown())
+check("an Undo row instead of the empty message", undoRowFor("Skipped 2 players") ~= nil and not page.empty:IsShown())
+check("its Add button reads Undo", undoRowFor("Skipped 2 players").add:GetLabel() == "Undo")
+check("Add all left its own Undo row", undoRowFor("Added 3 players") ~= nil)
+H.clock = H.clock + 11
+ns.Fire("PENDING_CHANGED")
+check("after ten seconds: gone, empty message shown", undoRowFor("Skipped") == nil and page.empty:IsShown())
 
 -- ---------------------------------------------------------------------------
 section("Queue: saved, bounded, and kept tidy")
@@ -1537,10 +1547,12 @@ check("history has kills and deaths", (function()
 	local lines = ns.Detail:HistoryLines(st)
 	return type(lines) == "table" and #lines >= 4 end)())
 local dframe = ns.Detail:_frame()
+_G.PersonalVendettaToast:Hide()
 dframe.remove:Click()
 check("remove takes them off", select(2, ns.List:Find("Player-4710-00ST0001")) == nil)
-check("undo offered", ns.Toast:IsShown() and _G.PersonalVendettaToast.button:IsShown())
-_G.PersonalVendettaToast.button:Click()
+check("Remove turns into Undo", dframe.remove:GetText() == "Undo" and ns.Detail:Undoing())
+check("no pop-up in the middle of the screen", not ns.Toast:IsShown())
+dframe.remove:Click()
 local _, back = ns.List:Find("Player-4710-00ST0001")
 check("undo brings them back with their score", back and back.theyKilledMe == 3 and back.iKilledThem == 3,
 	back and (back.theyKilledMe .. "/" .. back.iKilledThem))
@@ -1550,15 +1562,17 @@ check("detail not open for an unknown key", (function() ns.Detail:_frame():Hide(
 section("Undo for skips")
 clearQueue()
 die({ "Undoskip", "Player-4710-00US0001" })
+_G.PersonalVendettaToast:Hide()
 addRowFor("Undoskip").skip:Click()
 check("skipped", addRowFor("Undoskip") == nil)
-check("undo toast for the skip", ns.Toast:IsShown() and (_G.PersonalVendettaToast.title:GetText() or ""):find("Undoskip", 1, true))
-_G.PersonalVendettaToast.button:Click()
+check("Undo row in its place", undoRowFor("Undoskip") ~= nil)
+check("no pop-up", not ns.Toast:IsShown())
+undoRowFor("Undoskip").add:Click()
 check("undo puts them back in the queue", addRowFor("Undoskip") ~= nil)
 die({ "Skipa", "Player-4710-00US0002" }, { "Skipb", "Player-4710-00US0003" })
 ns.Overlay._addPage().skipAll:Click()
 check("skip all empties the queue", ns.Pending:Count() == 0, ns.Pending:Count())
-_G.PersonalVendettaToast.button:Click()
+undoRowFor("Skipped 3 players").add:Click()
 check("one undo brings everyone back", ns.Pending:Count() >= 3, ns.Pending:Count())
 clearQueue()
 
@@ -1647,7 +1661,7 @@ section("Feedback")
 local fb = ns.Settings:Feedback()
 check("feedback window opens", fb:IsShown())
 check("links to the CurseForge comments", fb.url:GetText() == "https://www.curseforge.com/wow/addons/personal-vendetta-pvp/comments")
-check("version line for bug reports", (fb.info:GetText() or ""):find("Personal Vendetta 2.0", 1, true) ~= nil, fb.info:GetText())
+check("version line for bug reports", (fb.info:GetText() or ""):find("Personal Vendetta 3.0", 1, true) ~= nil, fb.info:GetText())
 fb.url:SetText("typed over")
 fb.url:GetScript("OnTextChanged")(fb.url)
 check("link box is read-only", fb.url:GetText() == ns.FEEDBACK_URL)
@@ -1787,6 +1801,228 @@ H.inGroup = false
 snd.quietCapitals, snd.quietTowns = false, false
 H.zone, H.subzone, H.resting = "Elwynn Forest", "Goldshire", false
 resetWorld()
+
+
+-- ===========================================================================
+-- v3.0: the main window
+-- ===========================================================================
+
+section("Main window: tabs and pages")
+resetWorld()
+clearQueue()
+ns.Main:Toggle(false)
+_G.PersonalVendettaMinimapButton:Click("LeftButton")
+check("minimap opens the main window", ns.Main:IsShown())
+ns.Main:Open("settings", "alerts")
+check("settings tab on Alerts", ns.Main.current == "settings" and ns.Settings.current == "alerts")
+ns.Main:Open("add")
+check("To add tab", ns.Main.current == "add" and ns.Settings.current == "add")
+ns.Main:Open("list")
+check("back to the Hit list", ns.Main.current == "list")
+check("Escape closes it", (function()
+	for _, n in ipairs(UISpecialFrames) do if n == "PersonalVendettaMain" then return true end end
+end)())
+
+section("Main window: categories")
+local function headerFor(id)
+	for _, f in ipairs(H.frames) do
+		if f.id == id and f.SetCollapsed and f:IsShown() then return f end
+	end
+end
+local function rowNamed(name)
+	for _, f in ipairs(H.frames) do
+		if f.key and f.entry and f.score and f.name and f:IsShown()
+			and (f.name:GetText() or ""):find(name, 1, true) then return f end
+	end
+end
+local nearOne = ns.List:RecordTheirKill({ guid = "Player-4710-00MW0001", name = "Nearguy", surname = "Main" })
+local scumOne = ns.List:RecordTheirKill({ guid = "Player-4710-00MW0002", name = "Scummy", surname = "Main" })
+ns.List:SetScum(scumOne.key, true)
+local oldOne = ns.List:RecordTheirKill({ guid = "Player-4710-00MW0003", name = "Oldtimer", surname = "Main" })
+oldOne.lastSeen = time() - 30 * 86400
+H.units.nameplate8 = enemy("Nearguy", "Main", "Player-4710-00MW0001")
+H.clock = H.clock + 60
+step()
+ns.Main:Open("list")
+check("near header shown", headerFor("near") ~= nil)
+check("scum header shown", headerFor("scum") ~= nil)
+check("everyone-else header shown", headerFor("rest") ~= nil)
+local nr = rowNamed("Nearguy")
+check("near player listed with a marker", nr and nr.name:GetText():find(">", 1, true) ~= nil)
+check("score on the row", nr and (nr.score:GetText() or ""):find("1", 1, true) ~= nil)
+headerFor("rest"):Click()
+check("collapsing hides its rows", rowNamed("Oldtimer") == nil)
+check("collapse is remembered", ns.db.settings.listCollapsed.rest == true)
+headerFor("rest"):Click()
+check("expanding shows them again", rowNamed("Oldtimer") ~= nil)
+rowNamed("Scummy"):Click()
+check("click picks the player", ns.Main:Selected() == scumOne.key and ns.Detail:Key() == scumOne.key)
+check("their card shows the score", (ns.Detail:_frame().bigScore:GetText() or ""):find("1", 1, true) ~= nil)
+
+section("Main window: search box drives the list")
+ns.Settings:SetSearch("oldtimer")
+check("only the match left", rowNamed("Oldtimer") ~= nil and rowNamed("Nearguy") == nil)
+ns.Settings:SetSearch("")
+check("cleared: everyone back", rowNamed("Nearguy") ~= nil)
+
+section("Main window: remove from the card")
+ns.Main:Select(oldOne.key)
+ns.Detail:_frame().remove:Click()
+check("removed", select(2, ns.List:Find("Player-4710-00MW0003")) == nil)
+check("the card stays, offering Undo", ns.Detail:Undoing() and ns.Detail:_frame().remove:GetText() == "Undo")
+ns.Detail:_frame().remove:Click()
+check("undo brings them back and shows them", ns.Main:Selected() == oldOne.key)
+
+section("Main window: summary bar")
+local settledCount, fought = 0, 0
+for _, e in pairs(ns.ListData()) do
+	if (e.theyKilledMe or 0) > 0 then
+		fought = fought + 1
+		if (e.iKilledThem or 0) >= e.theyKilledMe then settledCount = settledCount + 1 end
+	end
+end
+local mainFrame = ns.Main:Frame()
+local function findText(needle)
+	for _, f in ipairs(H.frames) do
+		if f.text and f.text.GetText and (f.text:GetText() or ""):find(needle, 1, true) then return true end
+	end
+	return false
+end
+check("settled count in the bar", findText(string.format("Vendettas settled %d / %d", settledCount, fought)))
+
+section("Main window: To add page")
+clearQueue()
+die({ "Cardguy", "Player-4710-00MW0010" }, { "Cardtwo", "Player-4710-00MW0011" })
+ns.Main:Open("add")
+local function cardFor(name)
+	for _, f in ipairs(H.frames) do
+		if f.id and f.add and f.skip and f.item and f:IsShown() and (f.name:GetText() or ""):find(name, 1, true) then return f end
+	end
+end
+local card1 = cardFor("Cardguy")
+check("queued player has a card", card1 ~= nil)
+check("card says what happened", card1 and (card1.detail:GetText() or ""):find("Killed you", 1, true) ~= nil)
+card1.scum:SetChecked(true)
+card1.scum:Click()
+card1.add:Click()
+local _, cg = ns.List:Find("Player-4710-00MW0010")
+check("Add on the card adds them, as scum", cg and cg.scum == true)
+check("their card is gone", cardFor("Cardguy") == nil)
+check("an Undo card for the add", undoRowFor("Added Cardguy") ~= nil)
+cardFor("Cardtwo").skip:Click()
+check("Skip on the card", ns.Pending:Count() == 0)
+check("Undo card where it was", undoRowFor("Skipped Cardtwo") ~= nil)
+undoRowFor("Skipped Cardtwo").add:Click()
+check("undo puts the card back", cardFor("Cardtwo") ~= nil)
+clearQueue()
+ns.Main:Toggle(false)
+H.units.nameplate8 = nil
+resetWorld()
+
+section("Detail:Open goes through the main window")
+ns.Main:Toggle(false)
+ns.Detail:Open(nearOne.key)
+check("main window open on the list", ns.Main:IsShown() and ns.Main.current == "list")
+check("with that player picked", ns.Detail:Key() == nearOne.key and ns.Detail:IsOpen())
+ns.Main:Toggle(false)
+check("closing the window closes the card", not ns.Detail:IsOpen())
+
+
+-- ===========================================================================
+-- 3.0 polish
+-- ===========================================================================
+
+section("Radar dot turns red where you chose quiet")
+resetWorld()
+ns.Overlay.Toggle(true)
+local ovd = _G.PersonalVendettaOverlay
+H.cvars.nameplateShowEnemies, H.cvars.nameplateShowAll = "1", "1"
+ns.db.settings.sound.quietCapitals = true
+H.zone, H.subzone = "Elwynn Forest", "Goldshire"
+ns.Fire("QUIET_CHANGED")
+check("green out in the world", not ovd.dot.muted and not ovd.dot.blind)
+H.zone, H.subzone = "Stormwind City", "Trade District"
+ns.Fire("QUIET_CHANGED")
+check("red in Stormwind with capitals muted", ovd.dot.muted == true)
+ns.db.settings.sound.quietCapitals = false
+ns.Fire("QUIET_CHANGED")
+check("green in Stormwind when not muted", not ovd.dot.muted)
+ns.db.settings.sound.quietCapitals = true
+H.zone, H.subzone = "Elwynn Forest", "Goldshire"
+ns.Fire("QUIET_CHANGED")
+check("green again after leaving", not ovd.dot.muted)
+ns.db.settings.sound.quietCapitals = false
+
+section("Scum warnings for everyone around")
+resetWorld()
+H.chat = {}
+local sc = ns.List:RecordTheirKill({ guid = "Player-4710-00WR0001", name = "Yellme", surname = "Scum" })
+ns.List:SetScum(sc.key, true)
+H.units.nameplate9 = enemy("Yellme", "Scum", "Player-4710-00WR0001")
+H.clock = H.clock + 60
+step()
+local warnRow
+for _, r in ipairs(ns.Overlay._rows()) do if r.entry == sc then warnRow = r end end
+check("scum row has a Warn button", warnRow and warnRow.warn:IsShown())
+check("nothing yelled without a click", #H.chat == 0)
+warnRow.warn:Click()
+check("click yells the warning", H.chat[1] and H.chat[1].type == "YELL"
+	and H.chat[1].msg:find("Yellme Scum is nearby", 1, true) ~= nil, H.chat[1] and H.chat[1].msg)
+check("raid skull marker in the text", H.chat[1] and H.chat[1].msg:find("{rt8}", 1, true) ~= nil)
+ns.db.settings.scumWarnButton = false
+ns.Fire("SETTINGS_CHANGED")
+check("button can be switched off", not warnRow.warn:IsShown())
+ns.db.settings.scumWarnButton = true
+-- Party chat, automatically, for people without the addon.
+H.units.nameplate9 = nil
+step(3) ; step(40)
+H.inGroup = true
+H.chat = {}
+H.units.nameplate9 = enemy("Yellme", "Scum", "Player-4710-00WR0001")
+step()
+check("party told in chat", H.chat[1] and H.chat[1].type == "PARTY")
+local plain = ns.List:RecordTheirKill({ guid = "Player-4710-00WR0002", name = "Notscum", surname = "Guy" })
+H.chat = {}
+H.units.nameplate10 = enemy("Notscum", "Guy", "Player-4710-00WR0002")
+step()
+check("not for someone who isn't scum", #H.chat == 0)
+ns.db.settings.scumWarnParty = false
+H.units.nameplate9 = nil ; step(3) ; step(40)
+H.units.nameplate9 = enemy("Yellme", "Scum", "Player-4710-00WR0001")
+step()
+check("party warning can be switched off", #H.chat == 0)
+ns.db.settings.scumWarnParty = true
+H.inGroup = false
+H.units.nameplate9, H.units.nameplate10 = nil, nil
+resetWorld()
+
+section("History: where and how")
+local hk = ns.List:RecordTheirKill({ guid = "Player-4710-00HS0001", name = "Howkill", surname = "Er",
+	spell = "Ambush", killingBlow = true, n = 2 })
+local last = hk.history[#hk.history]
+check("where: zone and coordinates", last.z ~= nil and last.xy == "42, 65", last.xy)
+check("how: spell, killing blow, 2v1", last.sp == "Ambush" and last.kb == true and last.n == 2)
+local hl = ns.Detail:HistoryLines(hk)[1]
+check("history line reads it out", hl:find("Killed you (2v1, Ambush, killing blow)", 1, true) ~= nil
+	and hl:find("(42, 65)", 1, true) ~= nil, hl)
+ns.List:Log(hk, "fought")
+check("walked away: not settled", ns.Detail:HistoryLines(hk)[1]:find("Not settled", 1, true) ~= nil)
+ns.List:Log(hk, "killed")
+check("a win says so", ns.Detail:HistoryLines(hk)[1]:find("You won the fight", 1, true) ~= nil)
+H.mapPos = nil
+ns.List:Log(hk, "seen")
+check("no coordinates when the game won't say", hk.history[#hk.history].xy == nil)
+H.mapPos = { 0.4237, 0.6512 }
+
+section("Undo by command")
+local rmv = ns.List:RecordTheirKill({ guid = "Player-4710-00UN0001", name = "Cmdundo", surname = "X" })
+SlashCmdList.PERSONALVENDETTA("remove Cmdundo")
+check("removed by command", select(2, ns.List:Find("Player-4710-00UN0001")) == nil)
+SlashCmdList.PERSONALVENDETTA("undo")
+check("/vendetta undo brings them back", select(2, ns.List:Find("Player-4710-00UN0001")) ~= nil)
+H.clearOutput()
+SlashCmdList.PERSONALVENDETTA("undo")
+check("twice: nothing to undo", H.outputContains("Nothing to undo"))
 
 -- ---------------------------------------------------------------------------
 say(string.format("\n%d passed, %d failed", passed, failed))

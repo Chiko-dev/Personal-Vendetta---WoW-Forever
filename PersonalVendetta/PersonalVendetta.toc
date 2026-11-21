@@ -6,7 +6,7 @@
 ## Notes-esES: Una lista negra de los jugadores que te han matado en el mundo abierto. No avisa de cada enemigo: solo de los que te mataron.
 ## Notes-esMX: Una lista negra de los jugadores que te han matado en el mundo abierto. No avisa de cada enemigo: solo de los que te mataron.
 ## Notes-ruRU: Список игроков, убивших вас в открытом мире. Не предупреждает о каждом враге: только о тех, кто вас убил.
-## Version: 2.0
+## Version: 3.0
 ## SavedVariables: PersonalVendettaAccountDB
 ## SavedVariablesPerCharacter: PersonalVendettaDB
 ## IconTexture: Interface\AddOns\PersonalVendetta\Media\icon
@@ -18,6 +18,7 @@ Locales\frFR.lua
 Locales\esES.lua
 Locales\ruRU.lua
 Core.lua
+Skin.lua
 Sound.lua
 Deaths.lua
 Radar.lua
@@ -31,4 +32,5 @@ Detail.lua
 Marks.lua
 Overlay.lua
 Settings.lua
+Main.lua
 Minimap.lua
